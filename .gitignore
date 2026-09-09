@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Build and release artifacts
+build/
+dist/
+release/
+*.spec.bak
+*.zip
+
+# Downloaded models and runtime-generated data
+models_cache/
+recovery/
+*.recovery.json
+
+# Local project/audio outputs
+*.moracutter.json
+exports/
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
