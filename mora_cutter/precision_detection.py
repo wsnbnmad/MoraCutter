@@ -128,6 +128,13 @@ def _ctc_edges(blank: np.ndarray, count: int, start: float, end: float) -> list[
     return edges + [end]
 
 
+def _ctc_safe_input(samples: np.ndarray, minimum_samples: int = 8_000) -> np.ndarray:
+    """Pad a short CTC input without changing its external timestamps."""
+    if len(samples) >= minimum_samples:
+        return samples
+    return np.pad(samples, (0, minimum_samples-len(samples)))
+
+
 def _sequence_map(target: list[str], observed: list[str]) -> list[int | None]:
     """Levenshtein-align labels; each target index points at its observed counterpart."""
     n, m = len(target), len(observed)
@@ -234,8 +241,14 @@ def kotoba_reazon_silero_detect(path: str, source_id: str, transcript: str, unit
     for index, (start, end, text) in enumerate(chunks, 1):
         _cancel(cancel_event)
         labels = labels_for_unit(text, unit)
-        if not labels: continue
+        if not labels or end <= start:
+            continue
         clip = audio[max(0, int(start*16000)):min(len(audio), int(end*16000))]
+        # Whisper can emit punctuation or a very short partial chunk.  A
+        # Wav2Vec2 feature-extractor convolution requires more than a few
+        # samples, so pad only the model input; keep the original interval for
+        # all resulting timestamps.
+        clip = _ctc_safe_input(clip)
         values = cproc(clip, sampling_rate=16000, return_tensors="pt").input_values.to(device=device, dtype=dtype)
         with torch.inference_mode(): logits = cmodel(values).logits[0].float().cpu()
         blank = torch.softmax(logits, dim=-1)[:, blank_id].numpy()

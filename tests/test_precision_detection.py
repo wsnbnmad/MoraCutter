@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import unittest
 
-from mora_cutter.precision_detection import _retime_target, _sequence_map
+import numpy as np
+
+from mora_cutter.precision_detection import _ctc_safe_input, _retime_target, _sequence_map
 
 
 class PrecisionAlignmentTests(unittest.TestCase):
@@ -17,3 +19,7 @@ class PrecisionAlignmentTests(unittest.TestCase):
         actual = _retime_target(target, observed, 0.6)
         self.assertEqual([row[2] for row in actual], target)
         self.assertTrue(all(row[0] < row[1] for row in actual))
+
+    def test_short_ctc_input_is_padded_for_the_feature_extractor(self) -> None:
+        padded = _ctc_safe_input(np.zeros(12, dtype=np.float32))
+        self.assertEqual(len(padded), 8000)
