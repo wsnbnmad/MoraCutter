@@ -1289,34 +1289,58 @@ class MoraCutterApp(AppBase):
             self.draw_audio()
 
     def _fill_detail(self, segment: Segment) -> None:
-        self.detail_vars["label"].set(segment.label)
-        self.detail_vars["pitch"].set(segment.pitch)
-        self.detail_vars["start"].set(f"{segment.start:.4f}")
-        self.detail_vars["cue"].set(f"{segment.cue:.4f}")
-        self.detail_vars["end"].set(f"{segment.end:.4f}")
-        self.detail_vars["gain"].set(f"{segment.gain_db:.1f}")
+        self._suppress_detail_apply = True
+        try:
+            self.detail_vars["label"].set(segment.label)
+            self.detail_vars["pitch"].set(segment.pitch)
+            self.detail_vars["start"].set(f"{segment.start:.4f}")
+            self.detail_vars["cue"].set(f"{segment.cue:.4f}")
+            self.detail_vars["end"].set(f"{segment.end:.4f}")
+        finally:
+            self._suppress_detail_apply = False
         self.favorite_var.set(segment.favorite)
         self.accepted_var.set(segment.accepted)
         self.breath_var.set(segment.breath)
 
+    def _queue_detail_apply(self, *_: object) -> None:
+        if self._suppress_detail_apply or self.current_segment() is None:
+            return
+        if self._detail_apply_job is not None:
+            self.after_cancel(self._detail_apply_job)
+        self._detail_apply_job = self.after(350, self._apply_detail_automatically)
+
+    def _apply_detail_automatically(self) -> None:
+        self._detail_apply_job = None
+        self._apply_detail(show_error=False, status="候補を自動更新しました")
+
     def apply_detail(self) -> None:
+        self._apply_detail(show_error=True, status="候補を更新しました")
+
+    def _apply_detail(self, show_error: bool, status: str) -> bool:
         segment = self.current_segment()
         source = self.current_source()
         if not segment or not source:
-            return
+            return False
         try:
             values = {key: float(self.detail_vars[key].get()) for key in ("start", "cue", "end")}
         except ValueError:
-            messagebox.showerror("入力エラー", "開始、cue、終了には秒数を入力してください。")
-            return
+            if show_error:
+                messagebox.showerror("入力エラー", "開始、cue、終了には秒数を入力してください。")
+            return False
+        label = self.detail_vars["label"].get().strip() or "未分類"
+        pitch = self.detail_vars["pitch"].get().strip() or "--"
+        unchanged = (segment.label == label and segment.pitch == pitch and
+                     segment.start == values["start"] and segment.cue == values["cue"] and segment.end == values["end"])
+        if unchanged:
+            return True
         self._record()
-        segment.label = self.detail_vars["label"].get().strip() or "未分類"
-        segment.pitch = self.detail_vars["pitch"].get().strip() or "--"
+        segment.label = label
+        segment.pitch = pitch
         segment.start, segment.cue, segment.end = values["start"], values["cue"], values["end"]
-        segment.gain_db = float(np.clip(values["gain"], -48.0, 48.0))
         segment.clamp(source.duration)
         self._analyze_segment(segment)
-        self._after_project_change("候補を更新しました")
+        self._after_project_change(status)
+        return True
 
     def apply_flags(self) -> None:
         segment = self.current_segment()
