@@ -14,7 +14,7 @@ Windowsでは [setup_high_accuracy.bat](setup_high_accuracy.bat) をダブルク
 
 RTX 3060などのNVIDIA GPUで高速化するには、続けて [setup_gpu_acceleration.bat](setup_gpu_acceleration.bat) を実行します。これはCUDA対応PyTorchへ切り替えるための一度だけの準備です。
 
-MFAは素材テキスト必須です。Kotoba経路では、素材テキストがある場合に認識結果と歌詞を対応付けてからCTC境界を補正します。ダウンロード済みモデルは `models_cache` に置かれ、Gitと配布ZIPには含めません。
+MFAは素材テキスト必須です。Windows版MFAはKalpyを含むConda環境が必要なため、[setup_mfa.bat](setup_mfa.bat) で専用環境を用意します。Kotoba経路では、素材テキストがある場合に歌詞全体をReazonSpeech CTCへ強制アラインし、各モーラを実際の音声フレームへ割り当てます。ダウンロード済みモデルは `models_cache` に置かれ、Gitと配布ZIPには含めません。
 
 ## ベンチマーク
 

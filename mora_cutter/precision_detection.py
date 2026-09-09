@@ -58,6 +58,24 @@ def _write_wav(source: str, target: Path) -> None:
         raise RuntimeError(done.stderr.decode("utf-8", "replace"))
 
 
+def _mfa_command() -> list[str]:
+    """Find a working MFA command, preferring the dedicated Conda environment."""
+    direct = shutil.which("mfa") or shutil.which("mfa.exe")
+    candidates: list[list[str]] = [[direct]] if direct else []
+    conda = shutil.which("conda") or shutil.which("conda.exe")
+    if conda:
+        candidates.append([conda, "run", "-n", "moracutter-mfa", "mfa"])
+    for command in candidates:
+        done = subprocess.run(command + ["--version"], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", **_hidden_subprocess_kwargs())
+        if done.returncode == 0:
+            return command
+    raise RuntimeError(
+        "MFAの実行環境がありません。Python 3.13へpipで入れたMFAはKalpyを含まないため使用できません。"
+        "Miniforge/Condaを導入後、setup_mfa.batを実行してください。"
+    )
+
+
 def _mfa_intervals(path: Path) -> list[tuple[float, float, str]]:
     text = path.read_text(encoding="utf-8", errors="replace")
     tier = next((p for p in re.split(r"(?=\s*item \[\d+\]:)", text)
@@ -85,9 +103,7 @@ def mfa_detect(path: str, source_id: str, transcript: str, unit: str, cache_root
     labels = labels_for_unit(transcript, unit)
     if not labels:
         raise RuntimeError("MFA解析には素材のテキストが必要です。")
-    mfa = shutil.which("mfa") or shutil.which("mfa.exe")
-    if not mfa:
-        raise RuntimeError("MFA 3系のmfaコマンドが見つかりません。PATHへ追加してください。")
+    mfa = _mfa_command()
     def run(args: list[str]) -> None:
         done = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", **_hidden_subprocess_kwargs())
         if done.returncode:
@@ -97,14 +113,14 @@ def mfa_detect(path: str, source_id: str, transcript: str, unit: str, cache_root
     # the stable japanese_mfa model name.  The CLI does not accept a version
     # flag for this command on every supported MFA 3.x release.
     for kind in ("acoustic", "dictionary"):
-        run([mfa, "model", "download", kind, "japanese_mfa"])
+        run(mfa + ["model", "download", kind, "japanese_mfa"])
     _cancel(cancel_event)
     with tempfile.TemporaryDirectory(prefix="moracutter_mfa_") as folder:
         root = Path(folder); corpus = root/"corpus"; output = root/"aligned"
         corpus.mkdir(); output.mkdir(); _write_wav(path, corpus/"material.wav")
         (corpus/"material.lab").write_text(transcript.strip(), encoding="utf-8")
         report(22, "MFA: 強制アライン中")
-        run([mfa, "align", str(corpus), "japanese_mfa", "japanese_mfa", str(output),
+        run(mfa + ["align", str(corpus), "japanese_mfa", "japanese_mfa", str(output),
              "--clean", "--output_format", "long_textgrid", "--single_speaker"])
         grids = list(output.rglob("*.TextGrid"))
         if not grids:
@@ -133,6 +149,82 @@ def _ctc_safe_input(samples: np.ndarray, minimum_samples: int = 8_000) -> np.nda
     if len(samples) >= minimum_samples:
         return samples
     return np.pad(samples, (0, minimum_samples-len(samples)))
+
+
+def _ctc_viterbi_token_frames(log_probs: np.ndarray, tokens: list[int], blank_id: int) -> list[tuple[int, int, float]]:
+    """Forced-align CTC token ids and return frame spans for every token."""
+    if not tokens or len(log_probs) == 0:
+        return []
+    extended = np.empty(len(tokens) * 2 + 1, dtype=np.int32)
+    extended[::2] = blank_id
+    extended[1::2] = tokens
+    state_count = len(extended)
+    scores = np.full(state_count, -np.inf, dtype=np.float32)
+    scores[0] = log_probs[0, blank_id]
+    if state_count > 1:
+        scores[1] = log_probs[0, extended[1]]
+    parents = np.zeros((len(log_probs), state_count), dtype=np.int8)
+    for frame in range(1, len(log_probs)):
+        next_scores = np.full(state_count, -np.inf, dtype=np.float32)
+        for state in range(state_count):
+            best, parent = scores[state], 0
+            if state and scores[state-1] > best:
+                best, parent = scores[state-1], 1
+            if state > 1 and extended[state] != blank_id and extended[state] != extended[state-2] and scores[state-2] > best:
+                best, parent = scores[state-2], 2
+            next_scores[state] = best + log_probs[frame, extended[state]]
+            parents[frame, state] = parent
+        scores = next_scores
+    state = state_count - 1 if scores[-1] >= scores[-2] else state_count - 2
+    states = np.zeros(len(log_probs), dtype=np.int32)
+    for frame in range(len(log_probs)-1, -1, -1):
+        states[frame] = state
+        if frame:
+            state -= int(parents[frame, state])
+    result: list[tuple[int, int, float]] = []
+    for token_index in range(len(tokens)):
+        frames = np.flatnonzero(states == 2*token_index+1)
+        if len(frames) == 0:
+            result.append((0, 0, -20.0))
+        else:
+            result.append((int(frames[0]), int(frames[-1])+1, float(np.mean(log_probs[frames, tokens[token_index]]))))
+    return result
+
+
+def _ctc_forced_mora_timing(log_probs: np.ndarray, tokenizer: Any, labels: list[str], duration: float) -> list[tuple[float, float, str, float]]:
+    """Align each kana inside a mora against the ReazonSpeech CTC lattice."""
+    vocabulary = tokenizer.get_vocab()
+    unknown = int(getattr(tokenizer, "unk_token_id", -1))
+    token_ids: list[int] = []
+    mora_ranges: list[tuple[int, int]] = []
+    for label in labels:
+        left = len(token_ids)
+        for character in label:
+            token_id = int(vocabulary.get(character, unknown))
+            if token_id < 0 or token_id == unknown:
+                return []
+            token_ids.append(token_id)
+        mora_ranges.append((left, len(token_ids)))
+    frames = _ctc_viterbi_token_frames(log_probs, token_ids, int(tokenizer.pad_token_id))
+    if not frames:
+        return []
+    step = duration / len(log_probs)
+    timed: list[tuple[float, float, str, float]] = []
+    previous_end = 0.0
+    for label, (left, right) in zip(labels, mora_ranges):
+        selected = frames[left:right]
+        starts = [row[0] for row in selected if row[1] > row[0]]
+        ends = [row[1] for row in selected if row[1] > row[0]]
+        if not starts:
+            start, end, confidence = previous_end, previous_end + step, 0.05
+        else:
+            start, end = min(starts)*step, max(ends)*step
+            confidence = float(np.clip(np.exp(np.mean([row[2] for row in selected])), 0.05, 0.98))
+        start = max(previous_end, start)
+        end = max(start + 0.008, end)
+        timed.append((start, min(duration, end), label, confidence))
+        previous_end = timed[-1][1]
+    return timed
 
 
 def _sequence_map(target: list[str], observed: list[str]) -> list[int | None]:
@@ -238,25 +330,32 @@ def kotoba_reazon_silero_detect(path: str, source_id: str, transcript: str, unit
     cmodel = Wav2Vec2ForCTC.from_pretrained(REAZON_MODEL, cache_dir=str(cache_root), torch_dtype=dtype).to(device).eval()
     blank_id = int(getattr(cmodel.config, "pad_token_id", 0) or 0)
     observed: list[tuple[float, float, str, float]] = []
-    for index, (start, end, text) in enumerate(chunks, 1):
-        _cancel(cancel_event)
-        labels = labels_for_unit(text, unit)
-        if not labels or end <= start:
-            continue
-        clip = audio[max(0, int(start*16000)):min(len(audio), int(end*16000))]
-        # Whisper can emit punctuation or a very short partial chunk.  A
-        # Wav2Vec2 feature-extractor convolution requires more than a few
-        # samples, so pad only the model input; keep the original interval for
-        # all resulting timestamps.
-        clip = _ctc_safe_input(clip)
-        values = cproc(clip, sampling_rate=16000, return_tensors="pt").input_values.to(device=device, dtype=dtype)
-        with torch.inference_mode(): logits = cmodel(values).logits[0].float().cpu()
-        blank = torch.softmax(logits, dim=-1)[:, blank_id].numpy()
-        edges = _ctc_edges(blank, len(labels), start, end)
-        observed.extend((edges[i], edges[i+1], label, .86) for i, label in enumerate(labels))
-        report(50+30*index/max(1, len(chunks)), f"ReazonSpeech: 文字対応とCTC境界を補正中 {index}/{len(chunks)}")
     target = labels_for_unit(transcript, unit) if transcript.strip() else []
-    timed = _retime_target(target, observed, duration)
+    if target:
+        # Do not distribute moras uniformly inside Kotoba chunks.  Force the
+        # user-supplied transcript through the full ReazonSpeech CTC lattice,
+        # which makes every mora compete for the frames where it is spoken.
+        _cancel(cancel_event)
+        values = cproc(_ctc_safe_input(audio), sampling_rate=16000, return_tensors="pt").input_values.to(device=device, dtype=dtype)
+        with torch.inference_mode(): logits = cmodel(values).logits[0].float().cpu()
+        timed = _ctc_forced_mora_timing(torch.log_softmax(logits, dim=-1).numpy(), cproc.tokenizer, target, duration)
+        report(80, f"ReazonSpeech: 歌詞のCTC強制アラインメント完了 {len(timed)}/{len(target)}モーラ")
+        if not timed:
+            raise RuntimeError("ReazonSpeech CTCで歌詞をアラインできませんでした。素材テキストをひらがなで確認してください。")
+    else:
+        for index, (start, end, text) in enumerate(chunks, 1):
+            _cancel(cancel_event)
+            labels = labels_for_unit(text, unit)
+            if not labels or end <= start:
+                continue
+            clip = audio[max(0, int(start*16000)):min(len(audio), int(end*16000))]
+            values = cproc(_ctc_safe_input(clip), sampling_rate=16000, return_tensors="pt").input_values.to(device=device, dtype=dtype)
+            with torch.inference_mode(): logits = cmodel(values).logits[0].float().cpu()
+            blank = torch.softmax(logits, dim=-1)[:, blank_id].numpy()
+            edges = _ctc_edges(blank, len(labels), start, end)
+            observed.extend((edges[i], edges[i+1], label, .86) for i, label in enumerate(labels))
+            report(50+30*index/max(1, len(chunks)), f"ReazonSpeech: 認識結果のCTC境界を補正中 {index}/{len(chunks)}")
+        timed = observed
     del cmodel, cproc; gc.collect()
     if device.startswith("cuda"): torch.cuda.empty_cache()
     report(84, "Silero VAD: 発声の前後端を補正中")
