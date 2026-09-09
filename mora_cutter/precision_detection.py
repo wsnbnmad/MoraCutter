@@ -200,7 +200,7 @@ def kotoba_reazon_silero_detect(path: str, source_id: str, transcript: str, unit
         from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, Wav2Vec2ForCTC, pipeline
         from silero_vad import get_speech_timestamps, load_silero_vad
     except ImportError as exc:
-        raise RuntimeError("高精度連結モデル用コンポーネントがありません。") from exc
+        raise RuntimeError("高精度連結モデル用コンポーネントがありません。setup_high_accuracy.batを一度実行してください。") from exc
     cache_root.mkdir(parents=True, exist_ok=True)
     device = "cuda:0" if use_gpu and torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if device.startswith("cuda") else torch.float32
@@ -250,4 +250,3 @@ def kotoba_reazon_silero_detect(path: str, source_id: str, transcript: str, unit
     timed = _vad_outer_edges(timed, speech)
     report(100, f"高精度連結モデル: 候補 {len(timed)}件")
     return _segments(source_id, decode_mono(path, DISPLAY_RATE), unit, timed)
-

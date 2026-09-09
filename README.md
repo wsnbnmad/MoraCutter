@@ -10,6 +10,8 @@
 python -m pip install -r requirements-high-accuracy.txt
 ```
 
+Windowsでは [setup_high_accuracy.bat](setup_high_accuracy.bat) をダブルクリックしても同じ準備ができます。
+
 MFAは素材テキスト必須です。Kotoba経路では、素材テキストがある場合に認識結果と歌詞を対応付けてからCTC境界を補正します。ダウンロード済みモデルは `models_cache` に置かれ、Gitと配布ZIPには含めません。
 
 ## ベンチマーク
