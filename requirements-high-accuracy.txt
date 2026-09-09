@@ -1,0 +1,8 @@
+# Optional dependencies for high-accuracy Japanese boundary detection.
+# Install with: python -m pip install -r requirements-high-accuracy.txt
+torch>=2.4
+transformers>=4.46
+accelerate>=1.0
+sentencepiece>=0.2
+silero-vad>=5.1
+montreal-forced-aligner>=3,<4

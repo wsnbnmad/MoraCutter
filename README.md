@@ -2,6 +2,26 @@
 
 音MAD・YTPMV向けの、人力ボーカロイド用音声切り出し支援ツールです。音声はすべてローカルで処理します。
 
+## 高精度な境界検出（任意）
+
+`MFA Japanese v3.0.0` と `Kotoba-Whisper v2.2 → ReazonSpeech CTC → Silero VAD` は、通常版とは別の任意依存です。開発版で使う場合は一度だけ次を実行します。
+
+```powershell
+python -m pip install -r requirements-high-accuracy.txt
+```
+
+MFAは素材テキスト必須です。Kotoba経路では、素材テキストがある場合に認識結果と歌詞を対応付けてからCTC境界を補正します。ダウンロード済みモデルは `models_cache` に置かれ、Gitと配布ZIPには含めません。
+
+## ベンチマーク
+
+`D:/曲/zunda/zunda/untitled.wav` と同梱の歌詞を固定ベンチマークとして登録しています。`python benchmarks/run_untitled_benchmark.py baseline` で基本の回帰検証、`kotoba` または `mfa` を指定して高精度経路を検証します。
+
+## v0.5.6の修正
+
+- 右ドラッグは開始・終了予定線の表示だけにし、`F` またはフリックパッドで発音を入力した時点で候補へ追加するようにしました。
+- `MFA Japanese v3.0.0`、`Kotoba-Whisper v2.2 → ReazonSpeech CTC → Silero VAD` をモデル選択へ追加しました。
+- 指定音声・歌詞を固定ベンチマークとして追加しました。
+
 ## v0.5.5の修正
 
 - 候補詳細の発音・音程・開始・cue・終了を入力後、自動で反映するようにしました。変更を適用ボタンは不要です。

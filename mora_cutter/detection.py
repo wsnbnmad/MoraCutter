@@ -28,6 +28,8 @@ class ModelInfo:
 
 def discover_models(root: Path) -> list[ModelInfo]:
     models = [
+        ModelInfo("MFA Japanese v3.0.0（テキスト必須）", supports_gpu=False, kind="mfa", model_id="japanese_mfa@3.0.0", download_note="Montreal Forced Aligner 3系とJapanese v3.0.0モデルを使用します。"),
+        ModelInfo("Kotoba-Whisper v2.2 → ReazonSpeech CTC → Silero VAD", supports_gpu=True, kind="kotoba_reazon_silero", model_id="kotoba-tech/kotoba-whisper-v2.2", download_note="初回にKotoba・ReazonSpeech・Sileroのモデルをmodels_cacheへ取得します。"),
         ModelInfo(
             "Whisper large-v3（高精度・補助候補）", supports_gpu=True, kind="whisper",
             model_id="large-v3", download_note="初回に約3GBのモデルをダウンロードします。",

@@ -28,6 +28,7 @@ from .detection import DISPLAY_RATE, baseline_detect, discover_models, external_
 from .domain import AudioSource, Project, Segment
 from .history import History
 from .japanese import labels_for_unit
+from .precision_detection import mfa_detect, kotoba_reazon_silero_detect
 from .project_io import load_project, save_project
 from .whisper_detection import WhisperCancelled, whisper_detect
 
@@ -1056,18 +1057,7 @@ class MoraCutterApp(AppBase):
         self._draw_overlays()
         start, end = sorted(self.selection)
         if end - start >= 0.005:
-            source = self.current_source()
-            if source:
-                self._record()
-                planned = Segment.create(source.id, start, end, cue=start, label="未分類", unit="character", order=len(self.project.segments)+1, origin="manual")
-                self._analyze_segment(planned)
-                self.project.segments.append(planned)
-                self.current_segment_id = planned.id
-                self.selection = (planned.start, planned.end)
-                self._fill_detail(planned)
-                self.refresh_segments()
-                self._draw_overlays()
-                self.status_var.set(f"切り出し予定を追加: {start:.3f}–{end:.3f}秒。Fキーまたは「フリックパッドを表示」で発音を選択します")
+            self.status_var.set(f"切り出し範囲: {start:.3f}–{end:.3f}秒。Fキーまたは「フリックパッドを表示」で発音を入力します")
 
     def _seek_playhead(self, value: float) -> None:
         source = self.current_source()
@@ -1498,6 +1488,10 @@ class MoraCutterApp(AppBase):
                         source.path, source.id, transcript, unit, model.model_id, use_gpu,
                         APP_DIR / "models_cache", self._queue_progress, self._detection_cancel_event, assist_only=True,
                     )
+                elif model.kind == "mfa":
+                    result = mfa_detect(source.path, source.id, transcript, unit, APP_DIR / "models_cache", self._queue_progress, self._detection_cancel_event)
+                elif model.kind == "kotoba_reazon_silero":
+                    result = kotoba_reazon_silero_detect(source.path, source.id, transcript, unit, use_gpu, APP_DIR / "models_cache", self._queue_progress, self._detection_cancel_event)
                 elif model.command:
                     self._queue_progress(10, f"外部モデルを実行中: {model.name}")
                     result = external_detect(model, source.path, source.id, transcript, unit, use_gpu)
@@ -1542,6 +1536,10 @@ class MoraCutterApp(AppBase):
                             source.path, source.id, transcript, unit, model.model_id, use_gpu,
                             APP_DIR / "models_cache", batch_progress, self._detection_cancel_event, assist_only=True,
                         )
+                    elif model.kind == "mfa":
+                        result = mfa_detect(source.path, source.id, transcript, unit, APP_DIR / "models_cache", batch_progress, self._detection_cancel_event)
+                    elif model.kind == "kotoba_reazon_silero":
+                        result = kotoba_reazon_silero_detect(source.path, source.id, transcript, unit, use_gpu, APP_DIR / "models_cache", batch_progress, self._detection_cancel_event)
                     elif model.command:
                         batch_progress(10, f"外部モデルを実行中: {model.name}")
                         result = external_detect(model, source.path, source.id, transcript, unit, use_gpu)
@@ -1583,6 +1581,10 @@ class MoraCutterApp(AppBase):
             note = "音量境界＋仮名テキスト。発音認識はしません。"
         elif model.kind == "whisper":
             note = f"高精度Whisperで発声候補だけを表示します。発音ラベルは手入力です。{model.download_note}"
+        elif model.kind == "mfa":
+            note = f"入力テキストを強制アラインして境界を作ります。{model.download_note}"
+        elif model.kind == "kotoba_reazon_silero":
+            note = f"Kotoba認識をReazonSpeech CTCとSilero VADで境界補正します。{model.download_note}"
         else:
             note = "外部モデルプラグイン"
         self.model_note.config(text=note)
@@ -1608,6 +1610,14 @@ class MoraCutterApp(AppBase):
                     "モデルをダウンロード",
                     f"{model.name}\n{model.download_note}\n\nダウンロード後の音声解析はローカルで完結します。続けますか？",
                 )
+        if model.kind == "mfa" and transcript != "batch" and not transcript.strip():
+            messagebox.showwarning("テキストが必要です", "MFA Japanese v3.0.0には素材のテキストが必要です。")
+            return False
+        if model.kind in {"mfa", "kotoba_reazon_silero"}:
+            return messagebox.askyesno(
+                "モデルを準備",
+                f"{model.name}\n{model.download_note}\n\n未導入の実行環境・モデルは初回に取得します。続けますか？",
+            )
         return True
 
     def export_all(self) -> None:
