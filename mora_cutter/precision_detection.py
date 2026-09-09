@@ -200,12 +200,15 @@ def kotoba_reazon_silero_detect(path: str, source_id: str, transcript: str, unit
         from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, Wav2Vec2ForCTC, pipeline
         from silero_vad import get_speech_timestamps, load_silero_vad
     except ImportError as exc:
-        raise RuntimeError("高精度連結モデル用コンポーネントがありません。setup_high_accuracy.batを一度実行してください。") from exc
+        raise RuntimeError("高精度連結モデル用コンポーネントがありません。setup_high_accuracy.batを一度実行してください。Silero VADにはonnxruntimeが必要です。") from exc
     cache_root.mkdir(parents=True, exist_ok=True)
     device = "cuda:0" if use_gpu and torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if device.startswith("cuda") else torch.float32
     audio = decode_mono(path, 16000); duration = len(audio)/16000
-    report(5, f"Kotoba: v2.2を準備中（{'GPU' if device.startswith('cuda') else 'CPU'}）")
+    if use_gpu and not device.startswith("cuda"):
+        report(5, "Kotoba: GPUが利用できないためCPUで実行中。setup_gpu_acceleration.batでCUDA版PyTorchを導入できます")
+    else:
+        report(5, f"Kotoba: v2.2を準備中（{'GPU' if device.startswith('cuda') else 'CPU'}）")
     processor = AutoProcessor.from_pretrained(KOTOBA_MODEL, cache_dir=str(cache_root))
     model = AutoModelForSpeechSeq2Seq.from_pretrained(KOTOBA_MODEL, cache_dir=str(cache_root), torch_dtype=dtype).to(device)
     asr = pipeline("automatic-speech-recognition", model=model, tokenizer=processor.tokenizer,
