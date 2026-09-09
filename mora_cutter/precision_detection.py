@@ -71,7 +71,7 @@ def _mfa_command() -> list[str]:
     if conda:
         candidates.append([conda, "run", "-n", "moracutter-mfa", "mfa"])
     for command in candidates:
-        done = subprocess.run(command + ["--version"], capture_output=True, text=True,
+        done = subprocess.run(command + ["--help"], capture_output=True, text=True,
                               encoding="utf-8", errors="replace", **_hidden_subprocess_kwargs())
         if done.returncode == 0:
             return command

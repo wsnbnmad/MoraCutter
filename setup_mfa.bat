@@ -15,6 +15,6 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-conda run -n moracutter-mfa mfa --version
+conda run -n moracutter-mfa mfa --help
 echo MFA setup completed. Restart Mora Cutter before using MFA Japanese.
 pause
