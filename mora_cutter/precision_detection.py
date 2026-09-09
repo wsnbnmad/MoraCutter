@@ -62,6 +62,10 @@ def _mfa_command() -> list[str]:
     """Find a working MFA command, preferring the dedicated Conda environment."""
     direct = shutil.which("mfa") or shutil.which("mfa.exe")
     candidates: list[list[str]] = [[direct]] if direct else []
+    for candidate in (Path.home()/"miniforge3"/"envs"/"moracutter-mfa"/"Scripts"/"mfa.exe",
+                      Path.home()/"mambaforge"/"envs"/"moracutter-mfa"/"Scripts"/"mfa.exe"):
+        if candidate.is_file():
+            candidates.append([str(candidate)])
     conda = shutil.which("conda") or shutil.which("conda.exe")
     if not conda:
         for candidate in (Path.home()/"miniforge3"/"Scripts"/"conda.exe", Path.home()/"mambaforge"/"Scripts"/"conda.exe"):

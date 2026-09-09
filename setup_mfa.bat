@@ -15,6 +15,11 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-conda run -n moracutter-mfa mfa --help
+conda run -n moracutter-mfa python -m pip install --upgrade "joblib==1.3.2" "setuptools==68.2.2" "soundfile==0.12.1"
+if errorlevel 1 (
+  echo MFA compatibility dependency installation failed.
+  pause
+  exit /b 1
+)
 echo MFA setup completed. Restart Mora Cutter before using MFA Japanese.
 pause
