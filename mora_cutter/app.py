@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from collections import Counter
 from datetime import datetime
 import json
 import math
