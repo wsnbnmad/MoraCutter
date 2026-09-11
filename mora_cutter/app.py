@@ -66,7 +66,7 @@ KANA_TO_ROMAJI = {
     )
     for kana, roman in zip(kana_row, roman_row)
 }
-ROMAJI_ALIASES = {"si": "shi", "ti": "chi", "tu": "tsu", "hu": "fu", "zi": "ji", "di": "ji", "du": "zu"}
+ROMAJI_ALIASES = {"si": "shi", "ti": "chi", "tu": "tsu", "hu": "fu", "zi": "ji", "di": "ji", "du": "zu", "nn": "n"}
 
 
 def _canonical_pronunciation(value: str) -> str:
@@ -227,6 +227,7 @@ class MoraCutterApp(AppBase):
         self.current_source_id: str | None = None
         self.current_samples: np.ndarray | None = None
         self.current_segment_id: str | None = None
+        self.last_selected_segment_id: str | None = None
         self.draft_segment: Segment | None = None
         self.manual_next_start = 0.0
         self.selection = (0.0, 0.0)
@@ -567,7 +568,7 @@ class MoraCutterApp(AppBase):
         else:
             source = self.current_source()
             if source:
-                self._play(source.path, self.playhead_time, min(source.duration, self.playhead_time + 8.0), False)
+                self._play(source.path, self.playhead_time, source.duration, False)
         return "break"
 
     def _play_cue_key(self, _event: object = None) -> str | None:
@@ -699,6 +700,7 @@ class MoraCutterApp(AppBase):
         self._save_transcript()
         self.current_source_id = self.project.sources[indexes[0]].id
         self.current_segment_id = None
+        self.last_selected_segment_id = None
         self.draft_segment = None
         self.manual_next_start = 0.0
         self.playhead_time = 0.0
@@ -1346,6 +1348,7 @@ class MoraCutterApp(AppBase):
         self._analyze_segment(segment)
         self.project.segments.append(segment)
         self.current_segment_id = segment.id
+        self.last_selected_segment_id = segment.id
         self.draft_segment = None
         self.manual_next_start = segment.end
         self.selection = (segment.start, segment.end)
@@ -1378,6 +1381,7 @@ class MoraCutterApp(AppBase):
         if not any(existing.id == segment.id for existing in self.project.segments):
             self.project.segments.append(segment)
         self.current_segment_id = segment.id
+        self.last_selected_segment_id = segment.id
         self.manual_next_start = segment.end
         self.draft_segment = None
         self._after_project_change(f"「{segment.label}」を更新しました")
@@ -1482,6 +1486,7 @@ class MoraCutterApp(AppBase):
         self.current_segment_id = ids[0]
         segment = self.current_segment()
         if segment:
+            self.last_selected_segment_id = segment.id
             self._fill_detail(segment)
             self.selection = (segment.start, segment.end)
             self.draw_audio()
@@ -1678,6 +1683,9 @@ class MoraCutterApp(AppBase):
         segment = self.current_segment()
         source = self.current_source()
         if source:
+            if segment is None and self.last_selected_segment_id:
+                previous = next((item for item in self.project.segments if item.id == self.last_selected_segment_id and item.source_id == source.id), None)
+                segment = previous
             if segment is not None:
                 self.playhead_time = segment.cue
             else:
@@ -2100,6 +2108,7 @@ class MoraCutterApp(AppBase):
         self.project_path = None
         self.current_source_id = None
         self.current_segment_id = None
+        self.last_selected_segment_id = None
         self.current_samples = None
         self.history = History(100)
         self._dirty = False
@@ -2120,6 +2129,7 @@ class MoraCutterApp(AppBase):
             self._remember_project(path)
             self.current_source_id = self.project.sources[0].id if self.project.sources else None
             self.current_segment_id = None
+            self.last_selected_segment_id = None
             self.current_samples = None
             self.history = History(100)
             self._dirty = False
