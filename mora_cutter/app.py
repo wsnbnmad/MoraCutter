@@ -434,7 +434,10 @@ class MoraCutterApp(AppBase):
         widths = {"label":120, "pitch":70, "start":95, "end":95}
         for key in columns:
             command = (lambda column=key: self._sort_list(column)) if key in {"label", "pitch", "start"} else None
-            self.segment_tree.heading(key, text=headings[key], command=command)
+            if command is None:
+                self.segment_tree.heading(key, text=headings[key])
+            else:
+                self.segment_tree.heading(key, text=headings[key], command=command)
             self.segment_tree.column(key, width=widths[key], anchor="center", stretch=key == "label")
         self.segment_tree.pack(fill="both", expand=True)
         self.segment_tree.bind("<<TreeviewSelect>>", self._segment_selected)
