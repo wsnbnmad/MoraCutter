@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime
 import json
+import math
 from pathlib import Path
 import queue
 import shutil
@@ -232,6 +233,9 @@ class MoraCutterApp(AppBase):
         self._detection_cancel_event: threading.Event | None = None
         self._detail_apply_job: str | None = None
         self._suppress_detail_apply = False
+        self.list_sort_key = "start"
+        self.list_sort_reverse = False
+        self._coverage_filter_labels: set[str] | None = None
 
         # self.models = discover_models(APP_DIR / "models")  # 自動認識を再開するまで保留
         self._build_style()
@@ -253,18 +257,9 @@ class MoraCutterApp(AppBase):
 
     def _build_menu(self) -> None:
         bar = tk.Menu(self)
-        file_menu = tk.Menu(bar, tearoff=False)
-        file_menu.add_command(label="新規プロジェクト", command=self.new_project, accelerator="Ctrl+N")
-        file_menu.add_command(label="プロジェクトを開く…", command=self.open_project, accelerator="Ctrl+O")
-        file_menu.add_command(label="保存", command=self.save, accelerator="Ctrl+S")
-        file_menu.add_command(label="名前を付けて保存…", command=self.save_as)
-        file_menu.add_separator()
-        file_menu.add_command(label="音声を追加…", command=self.add_audio, accelerator="Ctrl+I")
-        file_menu.add_command(label="復旧ファイルを開く…", command=self.open_recovery)
-        file_menu.add_separator()
-        file_menu.add_command(label="書き出し…", command=self.export_all, accelerator="Ctrl+E")
-        file_menu.add_command(label="終了", command=self._on_close)
-        bar.add_cascade(label="ファイル", menu=file_menu)
+        self.file_menu = tk.Menu(bar, tearoff=False, postcommand=self._refresh_file_menu)
+        self._refresh_file_menu()
+        bar.add_cascade(label="ファイル", menu=self.file_menu)
 
         edit_menu = tk.Menu(bar, tearoff=False)
         edit_menu.add_command(label="元に戻す", command=self.undo, accelerator="Ctrl+Z")
@@ -283,6 +278,45 @@ class MoraCutterApp(AppBase):
         help_menu.add_command(label="このアプリについて", command=lambda: messagebox.showinfo("Mora Cutter", f"Mora Cutter MVP {__version__}\nローカル・非破壊音声切り出し支援"))
         bar.add_cascade(label="ヘルプ", menu=help_menu)
         self.config(menu=bar)
+
+    def _recent_projects_path(self) -> Path:
+        return APP_DIR / "recent_projects.json"
+
+    def _recent_projects(self) -> list[str]:
+        try:
+            values = json.loads(self._recent_projects_path().read_text(encoding="utf-8"))
+            return [str(Path(value)) for value in values if Path(value).is_file()][:12]
+        except (OSError, ValueError, TypeError):
+            return []
+
+    def _remember_project(self, path: str) -> None:
+        target = str(Path(path).resolve())
+        values = [value for value in self._recent_projects() if value != target]
+        values.insert(0, target)
+        try:
+            self._recent_projects_path().write_text(json.dumps(values[:12], ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError:
+            pass
+
+    def _refresh_file_menu(self) -> None:
+        menu = self.file_menu
+        menu.delete(0, "end")
+        menu.add_command(label="新規プロジェクト", command=self.new_project, accelerator="Ctrl+N")
+        menu.add_command(label="プロジェクトを開く…", command=self.open_project, accelerator="Ctrl+O")
+        menu.add_command(label="保存", command=self.save, accelerator="Ctrl+S")
+        menu.add_command(label="名前を付けて保存…", command=self.save_as)
+        recent = self._recent_projects()
+        if recent:
+            menu.add_separator()
+            menu.add_command(label="最近のプロジェクト", state="disabled")
+            for index, path in enumerate(recent, 1):
+                menu.add_command(label=f"{Path(path).name}\tAlt+{index}", command=lambda value=path: self._load_project_path(value))
+        menu.add_separator()
+        menu.add_command(label="音声を追加…", command=self.add_audio, accelerator="Ctrl+I")
+        menu.add_command(label="復旧ファイルを開く…", command=self.open_recovery)
+        menu.add_separator()
+        menu.add_command(label="書き出し…", command=self.export_all, accelerator="Ctrl+E")
+        menu.add_command(label="終了", command=self._on_close)
 
     def _build_ui(self) -> None:
         toolbar = ttk.Frame(self, padding=(8, 7))
@@ -358,12 +392,15 @@ class MoraCutterApp(AppBase):
         self.zoom_label.pack(side="left")
         ttk.Button(navigation, text="＋", width=3, command=lambda: self.change_zoom(1)).pack(side="left")
         ttk.Label(navigation, text=" 表示位置 ").pack(side="left")
-        ttk.Button(navigation, text="◀ 100ms", command=lambda: self.move_viewport(-0.1)).pack(side="left", padx=(2, 3))
+        self.viewport_back_button = ttk.Button(navigation, command=lambda: self.move_viewport(-self._viewport_step()))
+        self.viewport_back_button.pack(side="left", padx=(2, 3))
         self.viewport_var = tk.DoubleVar(value=0.0)
         self.viewport_scale = ttk.Scale(navigation, from_=0.0, to=1.0, variable=self.viewport_var, command=self._viewport_changed)
         self.viewport_scale.pack(side="left", fill="x", expand=True)
         self.viewport_scale.bind("<ButtonRelease-1>", self._viewport_released)
-        ttk.Button(navigation, text="100ms ▶", command=lambda: self.move_viewport(0.1)).pack(side="left", padx=(3, 2))
+        self.viewport_forward_button = ttk.Button(navigation, command=lambda: self.move_viewport(self._viewport_step()))
+        self.viewport_forward_button.pack(side="left", padx=(3, 2))
+        self._update_viewport_step_buttons()
         ttk.Button(navigation, text="全体表示", command=self.reset_zoom).pack(side="left", padx=(5, 0))
 
         self.spectrum_button = ttk.Button(visual, text="▶ スペクトログラムを展開", command=self.toggle_spectrum)
@@ -384,19 +421,20 @@ class MoraCutterApp(AppBase):
         lower.add(candidates, weight=3)
         search_row = ttk.Frame(candidates)
         search_row.pack(fill="x", pady=(2, 4))
-        ttk.Label(search_row, text="候補", font=("TkDefaultFont", 11, "bold")).pack(side="left")
+        ttk.Label(search_row, text="リスト", font=("TkDefaultFont", 11, "bold")).pack(side="left")
         self.search_var = tk.StringVar()
         search = ttk.Entry(search_row, textvariable=self.search_var, width=22)
         search.pack(side="right")
         ttk.Label(search_row, text="検索 ").pack(side="right")
-        self.search_var.trace_add("write", lambda *_: self.refresh_segments())
+        self.search_var.trace_add("write", self._search_changed)
 
-        columns = ("label", "pitch", "start", "cue", "end")
+        columns = ("label", "pitch", "start", "end")
         self.segment_tree = ttk.Treeview(candidates, columns=columns, show="headings", selectmode="browse")
-        headings = {"label":"発音", "pitch":"音程", "start":"開始", "cue":"cue", "end":"終了"}
-        widths = {"label":95, "pitch":60, "start":90, "cue":90, "end":90}
+        headings = {"label":"発音", "pitch":"音程", "start":"開始", "end":"終了"}
+        widths = {"label":120, "pitch":70, "start":95, "end":95}
         for key in columns:
-            self.segment_tree.heading(key, text=headings[key])
+            command = (lambda column=key: self._sort_list(column)) if key in {"label", "pitch", "start"} else None
+            self.segment_tree.heading(key, text=headings[key], command=command)
             self.segment_tree.column(key, width=widths[key], anchor="center", stretch=key == "label")
         self.segment_tree.pack(fill="both", expand=True)
         self.segment_tree.bind("<<TreeviewSelect>>", self._segment_selected)
@@ -636,6 +674,7 @@ class MoraCutterApp(AppBase):
 
     def _load_current_audio(self) -> None:
         self._clear_visual_cache()
+        self._update_viewport_step_buttons()
         source = self.current_source()
         if not source:
             self.source_title.config(text="音声を追加してください")
@@ -767,7 +806,7 @@ class MoraCutterApp(AppBase):
             self.wave_canvas.create_line(*upper, fill="#70d6c7")
             self.wave_canvas.create_line(*lower, fill="#70d6c7")
         self.wave_canvas.create_line(0, middle, width, middle, fill="#34404a")
-        for sec in np.linspace(view_start, view_end, 9):
+        for sec in self._timeline_ticks(view_start, view_end):
             x = self._time_to_x(float(sec), width)
             self.wave_canvas.create_line(x, 0, x, height, fill="#27313a")
             self.wave_canvas.create_text(x+3, 9, text=self._format_time(float(sec)), fill="#8e99a5", anchor="nw", font=("TkDefaultFont", 8))
@@ -784,6 +823,16 @@ class MoraCutterApp(AppBase):
         self._wave_cache_peaks = None
         self._spectrogram_cache_key = None
         self._spectrogram_photo = None
+
+    @staticmethod
+    def _timeline_ticks(start: float, end: float) -> list[float]:
+        """Generate stable absolute-time grid lines that move with the waveform."""
+        span = max(end - start, 0.001)
+        candidates = (0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 30, 60)
+        interval = next((value for value in candidates if span / value <= 8), candidates[-1])
+        first = math.ceil(start / interval) * interval
+        ticks = [first + index * interval for index in range(int(span / interval) + 2)]
+        return [value for value in ticks if start - 1e-9 <= value <= end + 1e-9]
 
     def _draw_spectrogram(self, samples: np.ndarray, width: int, height: int) -> None:
         fft_size = 256
@@ -886,6 +935,7 @@ class MoraCutterApp(AppBase):
         visible = source.duration/self.zoom_level
         self.viewport_start = float(np.clip(anchor_time-anchor_ratio*visible, 0, max(0, source.duration-visible)))
         self._set_viewport_slider(source)
+        self._update_viewport_step_buttons()
         self.zoom_label.config(text=f"{target}×")
         self.draw_audio()
 
@@ -898,7 +948,21 @@ class MoraCutterApp(AppBase):
         else:
             self.viewport_var.set(0.0)
         self.zoom_label.config(text="1×")
+        self._update_viewport_step_buttons()
         self.draw_audio()
+
+    def _viewport_step(self) -> float:
+        """Use a smaller navigation increment as the waveform is magnified."""
+        source = self.current_source()
+        if source is None:
+            return 0.1
+        visible = source.duration / max(self.zoom_level, 1.0)
+        return float(np.clip(visible / 12, 0.001, 0.1))
+
+    def _update_viewport_step_buttons(self) -> None:
+        milliseconds = max(1, round(self._viewport_step() * 1000))
+        self.viewport_back_button.configure(text=f"◀ {milliseconds}ms")
+        self.viewport_forward_button.configure(text=f"{milliseconds}ms ▶")
 
     def _viewport_changed(self, raw: str) -> None:
         if self._suppress_viewport_command:
@@ -1321,13 +1385,37 @@ class MoraCutterApp(AppBase):
         self.segment_tree.delete(*self.segment_tree.get_children())
         query = self.search_var.get().lower().strip()
         segments = [s for s in self.project.segments if s.source_id == self.current_source_id]
-        for segment in sorted(segments, key=lambda s: (s.start, s.order)):
+        key_functions = {
+            "label": lambda item: (item.label.lower(), item.start, item.order),
+            "pitch": lambda item: (item.pitch.lower(), item.start, item.order),
+            "start": lambda item: (item.start, item.order),
+        }
+        segments = sorted(segments, key=key_functions[self.list_sort_key], reverse=self.list_sort_reverse)
+        duplicate_numbers: dict[str, int] = {}
+        for segment in segments:
+            duplicate_numbers[segment.label] = duplicate_numbers.get(segment.label, 0) + 1
             haystack = f"{segment.label} {segment.pitch}".lower()
+            if self._coverage_filter_labels is not None and segment.label not in self._coverage_filter_labels:
+                continue
             if query and query not in haystack:
                 continue
-            self.segment_tree.insert("", "end", iid=segment.id, values=(segment.label, segment.pitch, f"{segment.start:.3f}", f"{segment.cue:.3f}", f"{segment.end:.3f}"))
+            occurrence = duplicate_numbers[segment.label]
+            display_label = segment.label if occurrence == 1 else f"{segment.label} ({occurrence})"
+            self.segment_tree.insert("", "end", iid=segment.id, values=(display_label, segment.pitch, f"{segment.start:.3f}", f"{segment.end:.3f}"))
         if self.current_segment_id and self.segment_tree.exists(self.current_segment_id):
             self.segment_tree.selection_set(self.current_segment_id)
+
+    def _search_changed(self, *_: object) -> None:
+        self._coverage_filter_labels = None
+        self.refresh_segments()
+
+    def _sort_list(self, column: str) -> None:
+        if self.list_sort_key == column:
+            self.list_sort_reverse = not self.list_sort_reverse
+        else:
+            self.list_sort_key = column
+            self.list_sort_reverse = False
+        self.refresh_segments()
 
     def _segment_selected(self, _: object = None) -> None:
         ids = self.segment_tree.selection()
@@ -1783,27 +1871,40 @@ class MoraCutterApp(AppBase):
 
     def show_coverage(self) -> None:
         window = tk.Toplevel(self)
-        window.title("五十音の収集状況")
+        window.title("ローマ字表の収集状況")
         window.geometry("760x560")
-        kana_rows = ["あいうえお", "かきくけこ", "さしすせそ", "たちつてと", "なにぬねの", "はひふへほ", "まみむめも", "やゆよ", "らりるれろ", "わをん", "がぎぐげご", "ざじずぜぞ", "だぢづでど", "ばびぶべぼ", "ぱぴぷぺぽ"]
+        rows = (
+            ("あいうえお", ("a", "i", "u", "e", "o")), ("かきくけこ", ("ka", "ki", "ku", "ke", "ko")),
+            ("さしすせそ", ("sa", "shi", "su", "se", "so")), ("たちつてと", ("ta", "chi", "tsu", "te", "to")),
+            ("なにぬねの", ("na", "ni", "nu", "ne", "no")), ("はひふへほ", ("ha", "hi", "fu", "he", "ho")),
+            ("まみむめも", ("ma", "mi", "mu", "me", "mo")), ("やゆよ", ("ya", "yu", "yo")),
+            ("らりるれろ", ("ra", "ri", "ru", "re", "ro")), ("わをん", ("wa", "wo", "n")),
+            ("がぎぐげご", ("ga", "gi", "gu", "ge", "go")), ("ざじずぜぞ", ("za", "ji", "zu", "ze", "zo")),
+            ("だぢづでど", ("da", "ji", "zu", "de", "do")), ("ばびぶべぼ", ("ba", "bi", "bu", "be", "bo")),
+            ("ぱぴぷぺぽ", ("pa", "pi", "pu", "pe", "po")),
+        )
+        kana_to_romaji = {kana: roman for kana_row, roman_row in rows for kana, roman in zip(kana_row, roman_row)}
         counts: dict[str, int] = {}
         for segment in self.project.segments:
-            counts[segment.label] = counts.get(segment.label, 0) + 1
-        ttk.Label(window, text="青: 候補あり　灰: 未収集", padding=10).pack(anchor="w")
+            key = kana_to_romaji.get(segment.label, segment.label.lower())
+            counts[key] = counts.get(key, 0) + 1
+        ttk.Label(window, text="ローマ字を優先表示（青: 候補あり　灰: 未収集）", padding=10).pack(anchor="w")
         grid = ttk.Frame(window, padding=10)
         grid.pack(fill="both", expand=True)
-        for row, kana in enumerate(kana_rows):
-            for col, ch in enumerate(kana):
-                count = counts.get(ch, 0)
+        for row, (kana_row, roman_row) in enumerate(rows):
+            for col, (kana, roman) in enumerate(zip(kana_row, roman_row)):
+                count = counts.get(roman, 0)
                 color = "#367ca5" if count else "#59616a"
-                button = tk.Button(grid, text=f"{ch}\n{count}", width=6, height=2, bg=color, fg="white", relief="flat", command=lambda c=ch: self._filter_label(c, window))
+                button = tk.Button(grid, text=f"{roman}\n{kana}  {count}", width=7, height=2, bg=color, fg="white", relief="flat", command=lambda labels={kana, roman}: self._filter_label(labels, window))
                 button.grid(row=row, column=col, padx=3, pady=3)
         breaths = sum(s.breath for s in self.project.segments)
         sighs = sum(getattr(s, "sigh", False) for s in self.project.segments)
         ttk.Label(window, text=f"ブレス: {breaths}　息: {sighs}　全候補: {len(self.project.segments)}", padding=10).pack(anchor="w")
 
-    def _filter_label(self, label: str, window: tk.Toplevel) -> None:
-        self.search_var.set(label)
+    def _filter_label(self, labels: set[str], window: tk.Toplevel) -> None:
+        self.search_var.set("")
+        self._coverage_filter_labels = labels
+        self.refresh_segments()
         window.destroy()
 
     def show_settings(self) -> None:
@@ -1870,6 +1971,7 @@ class MoraCutterApp(AppBase):
         try:
             self.project = load_project(path)
             self.project_path = path
+            self._remember_project(path)
             self.current_source_id = self.project.sources[0].id if self.project.sources else None
             self.current_segment_id = None
             self.current_samples = None
@@ -1889,6 +1991,7 @@ class MoraCutterApp(AppBase):
             self._save_transcript()
             self._sync_settings()
             save_project(self.project, self.project_path)
+            self._remember_project(self.project_path)
             self._dirty = False
             self.status_var.set("プロジェクトを保存しました")
             return True
