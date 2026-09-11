@@ -313,24 +313,30 @@ class MoraCutterApp(AppBase):
         self.source_list.bind("<<ListboxSelect>>", self._source_selected)
         ttk.Button(left, text="選択した素材を除外", command=self.remove_source).pack(fill="x", pady=5)
         ttk.Separator(left).pack(fill="x", pady=8)
-        ttk.Label(left, text="補助解析（発声・ブレス候補）").pack(anchor="w")
+        self.detection_expanded = False
+        self.detection_toggle_button = ttk.Button(
+            left, text="▶ テスト機能（音声自動認識）を表示", command=self.toggle_detection_controls,
+        )
+        self.detection_toggle_button.pack(fill="x")
+        self.detection_frame = ttk.Frame(left)
+        ttk.Label(self.detection_frame, text="補助解析（発声・ブレス候補）").pack(anchor="w", pady=(7, 0))
         initial_model = self.project.settings.detection_model
         if initial_model not in [m.name for m in self.models]:
             initial_model = self.models[0].name
         self.model_var = tk.StringVar(value=initial_model)
-        self.model_combo = ttk.Combobox(left, textvariable=self.model_var, values=[m.name for m in self.models], state="readonly")
+        self.model_combo = ttk.Combobox(self.detection_frame, textvariable=self.model_var, values=[m.name for m in self.models], state="readonly")
         self.model_combo.pack(fill="x", pady=(3, 5))
         self.model_combo.bind("<<ComboboxSelected>>", lambda _: self._model_selected())
-        self.model_note = ttk.Label(left, text="Whisper large-v3のみ使用。候補の範囲だけを薄く提示します。", wraplength=215, foreground="#436c7b")
+        self.model_note = ttk.Label(self.detection_frame, text="Whisper large-v3のみ使用。候補の範囲だけを薄く提示します。", wraplength=215, foreground="#436c7b")
         self.model_note.pack(fill="x", pady=(0, 3))
         self.gpu_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(left, text="GPUが使える場合、GPUを使う", variable=self.gpu_var).pack(anchor="w")
+        ttk.Checkbutton(self.detection_frame, text="GPUが使える場合、GPUを使う", variable=self.gpu_var).pack(anchor="w")
         self.unit_var = tk.StringVar(value="一文字")
-        self.detect_button = ttk.Button(left, text="発声候補を解析", style="Accent.TButton", command=self.run_detection)
+        self.detect_button = ttk.Button(self.detection_frame, text="発声候補を解析", style="Accent.TButton", command=self.run_detection)
         self.detect_button.pack(fill="x", pady=(8, 2))
-        self.batch_detect_button = ttk.Button(left, text="全素材を一括解析", command=self.run_batch_detection)
+        self.batch_detect_button = ttk.Button(self.detection_frame, text="全素材を一括解析", command=self.run_batch_detection)
         self.batch_detect_button.pack(fill="x", pady=2)
-        self.cancel_detection_button = ttk.Button(left, text="解析をキャンセル", command=self.cancel_detection, state="disabled")
+        self.cancel_detection_button = ttk.Button(self.detection_frame, text="解析をキャンセル", command=self.cancel_detection, state="disabled")
         self.cancel_detection_button.pack(fill="x", pady=2)
         self.manual_mode_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(left, text="手動切り出しモード", variable=self.manual_mode_var, command=self._manual_mode_changed).pack(anchor="w", pady=(8, 0))
@@ -460,6 +466,16 @@ class MoraCutterApp(AppBase):
         ttk.Label(primary, textvariable=self.progress_percent_var, width=5, anchor="e").pack(side="left")
         self.secondary_status_var = tk.StringVar(value="自動保存: 待機中")
         ttk.Label(status, textvariable=self.secondary_status_var, anchor="w", foreground="#68727d").pack(fill="x")
+
+    def toggle_detection_controls(self) -> None:
+        """Show optional automatic-recognition controls without crowding manual work."""
+        self.detection_expanded = not self.detection_expanded
+        if self.detection_expanded:
+            self.detection_frame.pack(fill="x")
+            self.detection_toggle_button.configure(text="▼ テスト機能（音声自動認識）を隠す")
+        else:
+            self.detection_frame.pack_forget()
+            self.detection_toggle_button.configure(text="▶ テスト機能（音声自動認識）を表示")
 
     def _bind_keys(self) -> None:
         self.bind_all("<Control-n>", lambda _: self.new_project())
