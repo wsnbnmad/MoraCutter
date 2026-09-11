@@ -30,11 +30,11 @@ class Segment:
     label: str = ""
     unit: str = "mora"
     pitch: str = "--"
+    # Kept in project data for the commented-out auto-recognition code.
     confidence: float = 0.0
     quality_score: float = 0.0
-    favorite: bool = False
-    accepted: bool = False
     breath: bool = False
+    sigh: bool = False
     gain_db: float = 0.0
     order: int = 0
     origin: str = "auto"
@@ -80,7 +80,12 @@ class Project:
             version=int(raw.get("version", 1)),
             name=raw.get("name", "名称未設定"),
             sources=[AudioSource(**v) for v in raw.get("sources", [])],
-            segments=[Segment(**v) for v in raw.get("segments", [])],
+            # Older projects may contain auto-recognition confidence/rank
+            # fields and favourite/accepted flags.  Ignore those safely.
+            segments=[Segment(**{
+                key: value for key, value in v.items()
+                if key in Segment.__dataclass_fields__
+            }) for v in raw.get("segments", [])],
             transcripts=dict(raw.get("transcripts", {})),
             settings=ProjectSettings(**raw.get("settings", {})),
         )

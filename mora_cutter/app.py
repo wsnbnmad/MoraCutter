@@ -24,13 +24,15 @@ except ImportError:
 
 from . import __version__
 from .audio import AudioError, decode_mono, estimate_pitch, export_segment, play, probe, quality_metrics, safe_filename
-from .detection import DISPLAY_RATE, baseline_detect, discover_models, external_detect
+# 自動音声認識は手入力版へ戻す間、UI・起動経路から外している。
+# from .detection import DISPLAY_RATE, baseline_detect, discover_models, external_detect
+from .detection import DISPLAY_RATE
 from .domain import AudioSource, Project, Segment
 from .history import History
 from .japanese import labels_for_unit
-from .precision_detection import mfa_detect, kotoba_reazon_silero_detect
+# from .precision_detection import mfa_detect, kotoba_reazon_silero_detect
 from .project_io import load_project, save_project
-from .whisper_detection import WhisperCancelled, whisper_detect
+# from .whisper_detection import WhisperCancelled, whisper_detect
 
 
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
@@ -50,6 +52,7 @@ def _peak_envelope(samples: np.ndarray, bins: int) -> np.ndarray:
     return np.maximum.reduceat(absolute, edges[:-1])
 
 
+'''
 class FlickKanaPad(tk.Toplevel):
     """Small smartphone-style kana flick pad for one-character labelling."""
 
@@ -175,6 +178,9 @@ class FlickKanaPad(tk.Toplevel):
         self.on_select(label)
 
 
+'''
+
+
 class MoraCutterApp(AppBase):
     def __init__(self) -> None:
         super().__init__()
@@ -221,12 +227,13 @@ class MoraCutterApp(AppBase):
         self._wave_cache_peaks: np.ndarray | None = None
         self._spectrogram_cache_key: tuple[object, ...] | None = None
         self._dirty = False
+        # 自動音声認識は現在保留（手入力切り出しに専念する版）。
         self._detection_running = False
         self._detection_cancel_event: threading.Event | None = None
         self._detail_apply_job: str | None = None
         self._suppress_detail_apply = False
 
-        self.models = discover_models(APP_DIR / "models")
+        # self.models = discover_models(APP_DIR / "models")  # 自動認識を再開するまで保留
         self._build_style()
         self._build_menu()
         self._build_ui()
@@ -315,31 +322,6 @@ class MoraCutterApp(AppBase):
         self.source_list.bind("<<ListboxSelect>>", self._source_selected)
         ttk.Button(left, text="選択した素材を除外", command=self.remove_source).pack(fill="x", pady=5)
         ttk.Separator(left).pack(fill="x", pady=8)
-        self.detection_expanded = False
-        self.detection_toggle_button = ttk.Button(
-            left, text="▶ テスト機能（音声自動認識）を表示", command=self.toggle_detection_controls,
-        )
-        self.detection_toggle_button.pack(fill="x")
-        self.detection_frame = ttk.Frame(left)
-        ttk.Label(self.detection_frame, text="補助解析（発声・ブレス候補）").pack(anchor="w", pady=(7, 0))
-        initial_model = self.project.settings.detection_model
-        if initial_model not in [m.name for m in self.models]:
-            initial_model = self.models[0].name
-        self.model_var = tk.StringVar(value=initial_model)
-        self.model_combo = ttk.Combobox(self.detection_frame, textvariable=self.model_var, values=[m.name for m in self.models], state="readonly")
-        self.model_combo.pack(fill="x", pady=(3, 5))
-        self.model_combo.bind("<<ComboboxSelected>>", lambda _: self._model_selected())
-        self.model_note = ttk.Label(self.detection_frame, text="Whisper large-v3のみ使用。候補の範囲だけを薄く提示します。", wraplength=215, foreground="#436c7b")
-        self.model_note.pack(fill="x", pady=(0, 3))
-        self.gpu_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(self.detection_frame, text="GPUが使える場合、GPUを使う", variable=self.gpu_var).pack(anchor="w")
-        self.unit_var = tk.StringVar(value="一文字")
-        self.detect_button = ttk.Button(self.detection_frame, text="発声候補を解析", style="Accent.TButton", command=self.run_detection)
-        self.detect_button.pack(fill="x", pady=(8, 2))
-        self.batch_detect_button = ttk.Button(self.detection_frame, text="全素材を一括解析", command=self.run_batch_detection)
-        self.batch_detect_button.pack(fill="x", pady=2)
-        self.cancel_detection_button = ttk.Button(self.detection_frame, text="解析をキャンセル", command=self.cancel_detection, state="disabled")
-        self.cancel_detection_button.pack(fill="x", pady=2)
         self.manual_mode_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(left, text="手動切り出しモード", variable=self.manual_mode_var, command=self._manual_mode_changed).pack(anchor="w", pady=(8, 0))
 
@@ -391,14 +373,8 @@ class MoraCutterApp(AppBase):
         action_row = ttk.Frame(visual, padding=(0, 6))
         self.action_row = action_row
         action_row.pack(fill="x")
-        ttk.Button(action_row, text="フリックパッドを表示 (F)", command=self.show_flick_pad).pack(side="left")
-        ttk.Button(action_row, text="候補を更新 (Enter)", command=self.commit_draft).pack(side="left", padx=(4, 0))
-        ttk.Button(action_row, text="選択候補の発音変更", command=self.change_selected_label).pack(side="left", padx=(4, 0))
-        ttk.Label(action_row, text=" 発音 ").pack(side="left")
-        self.manual_label_var = tk.StringVar(value="未分類")
-        ttk.Entry(action_row, textvariable=self.manual_label_var, width=10).pack(side="left")
-        ttk.Button(action_row, text="前後付き再生", command=self.play_context).pack(side="left", padx=4)
-        self.wave_help_label = ttk.Label(action_row, text="  左ドラッグ: 再生位置 / 右ドラッグ: 範囲選択 / F: フリック")
+        ttk.Button(action_row, text="前後付き再生", command=self.play_context).pack(side="left")
+        self.wave_help_label = ttk.Label(action_row, text="  左ドラッグ: 再生位置 / 右ドラッグ: 範囲選択 / 詳細の発音欄でEnter: 候補追加")
         self.wave_help_label.pack(side="left")
 
         lower = ttk.Panedwindow(center_right, orient="horizontal")
@@ -415,13 +391,13 @@ class MoraCutterApp(AppBase):
         ttk.Label(search_row, text="検索 ").pack(side="right")
         self.search_var.trace_add("write", lambda *_: self.refresh_segments())
 
-        columns = ("label", "pitch", "start", "cue", "end", "confidence", "rank", "flags")
+        columns = ("label", "pitch", "start", "cue", "end")
         self.segment_tree = ttk.Treeview(candidates, columns=columns, show="headings", selectmode="browse")
-        headings = {"label":"発音", "pitch":"音程", "start":"開始", "cue":"cue", "end":"終了", "confidence":"信頼度", "rank":"順位", "flags":"状態"}
-        widths = {"label":80, "pitch":55, "start":80, "cue":80, "end":80, "confidence":65, "rank":45, "flags":75}
+        headings = {"label":"発音", "pitch":"音程", "start":"開始", "cue":"cue", "end":"終了"}
+        widths = {"label":95, "pitch":60, "start":90, "cue":90, "end":90}
         for key in columns:
             self.segment_tree.heading(key, text=headings[key])
-            self.segment_tree.column(key, width=widths[key], anchor="center", stretch=key in ("label", "flags"))
+            self.segment_tree.column(key, width=widths[key], anchor="center", stretch=key == "label")
         self.segment_tree.pack(fill="both", expand=True)
         self.segment_tree.bind("<<TreeviewSelect>>", self._segment_selected)
         self.segment_tree.bind("<Double-1>", lambda _: self.play_cue())
@@ -432,20 +408,22 @@ class MoraCutterApp(AppBase):
             "label": tk.StringVar(), "pitch": tk.StringVar(value="--"),
             "start": tk.StringVar(value="0.000"), "cue": tk.StringVar(value="0.000"), "end": tk.StringVar(value="0.000"),
         }
+        self.detail_entries: dict[str, ttk.Entry] = {}
         for row, (key, label) in enumerate((("label", "発音"), ("pitch", "音程"), ("start", "開始 (秒)"), ("cue", "cue (秒)"), ("end", "終了 (秒)"))):
             ttk.Label(detail, text=label).grid(row=row, column=0, sticky="w", pady=3)
-            ttk.Entry(detail, textvariable=self.detail_vars[key], width=16).grid(row=row, column=1, sticky="ew", padx=(8, 0), pady=3)
+            entry = ttk.Entry(detail, textvariable=self.detail_vars[key], width=16)
+            entry.grid(row=row, column=1, sticky="ew", padx=(8, 0), pady=3)
+            self.detail_entries[key] = entry
         detail.columnconfigure(1, weight=1)
         for variable in self.detail_vars.values():
             variable.trace_add("write", self._queue_detail_apply)
         ttk.Label(detail, text="入力内容は自動で反映されます", foreground="#68727d").grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 3))
-        self.favorite_var = tk.BooleanVar()
-        self.accepted_var = tk.BooleanVar()
         self.breath_var = tk.BooleanVar()
-        ttk.Checkbutton(detail, text="お気に入り", variable=self.favorite_var, command=self.apply_flags).grid(row=6, column=0, columnspan=2, sticky="w")
-        ttk.Checkbutton(detail, text="採用済み", variable=self.accepted_var, command=self.apply_flags).grid(row=7, column=0, columnspan=2, sticky="w")
-        ttk.Checkbutton(detail, text="息・ブレス", variable=self.breath_var, command=self.apply_flags).grid(row=8, column=0, columnspan=2, sticky="w")
-        ttk.Button(detail, text="候補を削除", command=self.delete_segment).grid(row=9, column=0, columnspan=2, sticky="ew", pady=(8, 3))
+        self.sigh_var = tk.BooleanVar()
+        self.detail_entries["label"].bind("<Return>", self._detail_label_enter)
+        ttk.Checkbutton(detail, text="ブレス", variable=self.breath_var, command=lambda: self.apply_voice_type("breath")).grid(row=6, column=0, columnspan=2, sticky="w")
+        ttk.Checkbutton(detail, text="息", variable=self.sigh_var, command=lambda: self.apply_voice_type("sigh")).grid(row=7, column=0, columnspan=2, sticky="w")
+        ttk.Button(detail, text="候補を削除", command=self.delete_segment).grid(row=8, column=0, columnspan=2, sticky="ew", pady=(8, 3))
 
         transcript_frame = ttk.LabelFrame(lower, text="素材のテキスト（任意）", padding=7)
         lower.add(transcript_frame, weight=2)
@@ -470,16 +448,6 @@ class MoraCutterApp(AppBase):
         self.secondary_status_var = tk.StringVar(value="自動保存: 待機中")
         ttk.Label(status, textvariable=self.secondary_status_var, anchor="w", foreground="#68727d").pack(fill="x")
 
-    def toggle_detection_controls(self) -> None:
-        """Show optional automatic-recognition controls without crowding manual work."""
-        self.detection_expanded = not self.detection_expanded
-        if self.detection_expanded:
-            self.detection_frame.pack(fill="x")
-            self.detection_toggle_button.configure(text="▼ テスト機能（音声自動認識）を隠す")
-        else:
-            self.detection_frame.pack_forget()
-            self.detection_toggle_button.configure(text="▶ テスト機能（音声自動認識）を表示")
-
     def _bind_keys(self) -> None:
         self.bind_all("<Control-n>", lambda _: self.new_project())
         self.bind_all("<Control-o>", lambda _: self.open_project())
@@ -492,8 +460,6 @@ class MoraCutterApp(AppBase):
         self.bind_all("<Left>", lambda e: self.nudge_cue(-0.001 if not (e.state & 1) else -0.010))
         self.bind_all("<Right>", lambda e: self.nudge_cue(0.001 if not (e.state & 1) else 0.010))
         self.bind_all("<space>", self._toggle_playback)
-        self.bind_all("<KeyPress-f>", self._show_flick_pad_key)
-        self.bind_all("<KeyPress-F>", self._show_flick_pad_key)
         self.bind_all("<KeyPress-s>", lambda _e: self.set_draft_marker("start"))
         self.bind_all("<KeyPress-S>", lambda _e: self.set_draft_marker("start"))
         self.bind_all("<KeyPress-c>", self._play_cue_key)
@@ -710,7 +676,6 @@ class MoraCutterApp(AppBase):
                         self.draw_audio()
                         messagebox.showwarning("未検出", f"発声区間を検出できませんでした。以前の自動候補{removed}件は削除しました（元に戻せます）。")
                         continue
-                    self._rerank()
                     self.refresh_sources()
                     self.refresh_segments()
                     self.draw_audio()
@@ -724,7 +689,6 @@ class MoraCutterApp(AppBase):
                     for source_id, segments in batches:
                         removed += self._replace_auto_segments(source_id, segments)
                         added += len(segments)
-                    self._rerank()
                     self.refresh_sources()
                     self.refresh_segments()
                     self.draw_audio()
@@ -1057,7 +1021,7 @@ class MoraCutterApp(AppBase):
                 self._resume_pointer_playback(source.path, self.playhead_time, segment.end)
         elif self.drag_mode in ("selection_start", "selection_end"):
             start, end = sorted(self.selection)
-            self.status_var.set(f"切り出し範囲を調整: {start:.3f}–{end:.3f}秒。Fキーで発音を入力します")
+            self.status_var.set(f"切り出し範囲を調整: {start:.3f}–{end:.3f}秒。候補の詳細で発音を入力してEnterを押します")
         elif self.drag_mode in ("start", "cue", "end"):
             self._dirty = True
             self.refresh_segments()
@@ -1095,6 +1059,12 @@ class MoraCutterApp(AppBase):
         self.drag_mode = "selection"
         self.drag_anchor = self._x_to_time(event.x)
         self.selection = (self.drag_anchor, self.drag_anchor)
+        self._suppress_detail_apply = True
+        try:
+            self.detail_vars["label"].set("")
+            self.detail_vars["pitch"].set("--")
+        finally:
+            self._suppress_detail_apply = False
         self.wave_canvas.config(cursor="crosshair")
         self._draw_overlays()
 
@@ -1117,10 +1087,17 @@ class MoraCutterApp(AppBase):
             # A manually created range has no cue yet; its start is the cue
             # that will be used when a pronunciation is registered.
             self.playhead_time = start
+            self._suppress_detail_apply = True
+            try:
+                self.detail_vars["start"].set(f"{start:.4f}")
+                self.detail_vars["cue"].set(f"{start:.4f}")
+                self.detail_vars["end"].set(f"{end:.4f}")
+            finally:
+                self._suppress_detail_apply = False
             self._draw_overlays()
             self.status_var.set(
                 f"切り出し範囲: {start:.3f}–{end:.3f}秒（再生位置/cue: {start:.3f}秒）。"
-                "Fキーまたは「フリックパッドを表示」で発音を入力します"
+                "候補の詳細で発音を入力してEnterを押します"
             )
 
     def _canvas_double_click(self, _event: tk.Event) -> str:
@@ -1261,7 +1238,6 @@ class MoraCutterApp(AppBase):
         self.current_segment_id = segment.id
         self.manual_next_start = segment.end
         self.draft_segment = None
-        self._rerank()
         self._after_project_change(f"「{segment.label}」を更新しました")
 
     def change_selected_label(self) -> None:
@@ -1293,11 +1269,11 @@ class MoraCutterApp(AppBase):
 
     def _manual_mode_changed(self) -> None:
         if self.manual_mode_var.get():
-            self.wave_help_label.config(text="  左ドラッグ: 再生位置 / 右ドラッグ: 範囲選択 / F: フリック")
+            self.wave_help_label.config(text="  左ドラッグ: 再生位置 / 右ドラッグ: 範囲選択 / 詳細の発音欄でEnter: 候補追加")
             self.wave_canvas.config(cursor="crosshair")
-            self.status_var.set("手動切り出しモード: 右ドラッグで範囲を選び、Fキーで発音を選択します")
+            self.status_var.set("手動切り出しモード: 右ドラッグで範囲を選び、候補の詳細で発音を入力してEnterを押します")
         else:
-            self.wave_help_label.config(text="  左ドラッグ: 再生位置 / 右ドラッグ: 範囲選択 / F: フリック")
+            self.wave_help_label.config(text="  左ドラッグ: 再生位置 / 右ドラッグ: 範囲選択 / 詳細の発音欄でEnter: 候補追加")
 
     def _replace_auto_segments(self, source_id: str, replacements: list[Segment]) -> int:
         removed = sum(
@@ -1320,30 +1296,18 @@ class MoraCutterApp(AppBase):
         segment.pitch, stability = estimate_pitch(self.current_samples[a:b], DISPLAY_RATE)
         clarity, noise = quality_metrics(self.current_samples[a:b], DISPLAY_RATE)
         segment.quality_score = 0.45*clarity + 0.30*noise + 0.25*stability
-        segment.confidence = segment.quality_score * 0.85
 
     def refresh_segments(self) -> None:
         self.segment_tree.delete(*self.segment_tree.get_children())
         query = self.search_var.get().lower().strip()
         segments = [s for s in self.project.segments if s.source_id == self.current_source_id]
         for segment in sorted(segments, key=lambda s: (s.start, s.order)):
-            flags = ("予定" if segment.label == "未分類" else "") + (" ★" if segment.favorite else "") + (" 採用" if segment.accepted else "") + (" ブレス" if segment.breath else "")
-            haystack = f"{segment.label} {segment.pitch} {flags}".lower()
+            haystack = f"{segment.label} {segment.pitch}".lower()
             if query and query not in haystack:
                 continue
-            rank = self._rank_for(segment)
-            self.segment_tree.insert("", "end", iid=segment.id, values=(segment.label, segment.pitch, f"{segment.start:.3f}", f"{segment.cue:.3f}", f"{segment.end:.3f}", f"{segment.confidence:.0%}", rank, flags))
+            self.segment_tree.insert("", "end", iid=segment.id, values=(segment.label, segment.pitch, f"{segment.start:.3f}", f"{segment.cue:.3f}", f"{segment.end:.3f}"))
         if self.current_segment_id and self.segment_tree.exists(self.current_segment_id):
             self.segment_tree.selection_set(self.current_segment_id)
-
-    def _rank_for(self, target: Segment) -> int:
-        same = sorted((s for s in self.project.segments if s.label == target.label), key=lambda s: (-s.quality_score, s.order))
-        return next((i for i, s in enumerate(same, 1) if s.id == target.id), 1)
-
-    def _rerank(self) -> None:
-        for order, segment in enumerate(self.project.segments, 1):
-            if not segment.order:
-                segment.order = order
 
     def _segment_selected(self, _: object = None) -> None:
         ids = self.segment_tree.selection()
@@ -1366,9 +1330,8 @@ class MoraCutterApp(AppBase):
             self.detail_vars["end"].set(f"{segment.end:.4f}")
         finally:
             self._suppress_detail_apply = False
-        self.favorite_var.set(segment.favorite)
-        self.accepted_var.set(segment.accepted)
         self.breath_var.set(segment.breath)
+        self.sigh_var.set(getattr(segment, "sigh", False))
 
     def _queue_detail_apply(self, *_: object) -> None:
         if self._suppress_detail_apply or self.current_segment() is None:
@@ -1410,15 +1373,56 @@ class MoraCutterApp(AppBase):
         self._after_project_change(status)
         return True
 
-    def apply_flags(self) -> None:
+    def _detail_label_enter(self, _event: object = None) -> str:
+        """Create a candidate from the active range, or update the selected one."""
+        label = self.detail_vars["label"].get().strip()
+        if not label:
+            return "break"
+        segment = self.current_segment()
+        source = self.current_source()
+        if segment is not None:
+            self._apply_detail(show_error=True, status="候補を更新しました")
+            return "break"
+        if source is None:
+            return "break"
+        start, end = sorted(self.selection)
+        if end - start < 0.005:
+            start = self.manual_next_start
+            end = min(source.duration, start + 0.12)
+        segment = Segment.create(source.id, start, end, cue=start, label=label, unit="character",
+                                 order=len(self.project.segments) + 1, origin="manual")
+        self._record()
+        self._analyze_segment(segment)
+        self.project.segments.append(segment)
+        self.current_segment_id = segment.id
+        self.selection = (start, end)
+        self.manual_next_start = end
+        self._after_project_change(f"「{label}」を候補に追加しました")
+        return "break"
+
+    def apply_voice_type(self, kind: str) -> None:
         segment = self.current_segment()
         if not segment:
             return
         self._record()
-        segment.favorite = self.favorite_var.get()
-        segment.accepted = self.accepted_var.get()
-        segment.breath = self.breath_var.get()
-        self._after_project_change("状態を更新しました")
+        if kind == "breath":
+            segment.breath = self.breath_var.get()
+            segment.sigh = False
+            self.sigh_var.set(False)
+            if segment.breath:
+                segment.label = "(ブレス)"
+            elif segment.label == "(ブレス)":
+                segment.label = "未分類"
+        else:
+            segment.sigh = self.sigh_var.get()
+            segment.breath = False
+            self.breath_var.set(False)
+            if segment.sigh:
+                segment.label = "(息)"
+            elif segment.label == "(息)":
+                segment.label = "未分類"
+        self._fill_detail(segment)
+        self._after_project_change("発声種別を更新しました")
 
     def nudge_cue(self, amount: float) -> None:
         if isinstance(self.focus_get(), (tk.Entry, tk.Text, ttk.Entry, ttk.Combobox)):
@@ -1548,10 +1552,12 @@ class MoraCutterApp(AppBase):
 
     def _update_mora_preview(self) -> None:
         text = self.transcript_text.get("1.0", "end-1c")
-        labels = labels_for_unit(text, UNIT_LABELS[self.unit_var.get()])
+        labels = labels_for_unit(text, "mora")
         preview = " / ".join(labels[:30]) + (" …" if len(labels) > 30 else "")
-        self.mora_preview.config(text=f"{self.unit_var.get()}: {len(labels)}\n{preview}")
+        self.mora_preview.config(text=f"モーラ: {len(labels)}\n{preview}")
 
+    '''
+    # 自動音声認識は手入力ワークフローを安定させる間、保留。
     def run_detection(self) -> None:
         if self._detection_running:
             messagebox.showinfo("解析中", "現在の解析をキャンセルしてから、もう一度実行してください。")
@@ -1709,9 +1715,11 @@ class MoraCutterApp(AppBase):
             )
         return True
 
+    '''
+
     def export_all(self) -> None:
         labelled = [s for s in self.project.segments if s.label and s.label != "未分類"]
-        segments = [s for s in labelled if s.accepted] or labelled
+        segments = labelled
         if not segments:
             messagebox.showinfo("候補がありません", "書き出す候補を作成してください。")
             return
@@ -1748,22 +1756,20 @@ class MoraCutterApp(AppBase):
         window.geometry("760x560")
         kana_rows = ["あいうえお", "かきくけこ", "さしすせそ", "たちつてと", "なにぬねの", "はひふへほ", "まみむめも", "やゆよ", "らりるれろ", "わをん", "がぎぐげご", "ざじずぜぞ", "だぢづでど", "ばびぶべぼ", "ぱぴぷぺぽ"]
         counts: dict[str, int] = {}
-        accepted: set[str] = set()
         for segment in self.project.segments:
             counts[segment.label] = counts.get(segment.label, 0) + 1
-            if segment.accepted:
-                accepted.add(segment.label)
-        ttk.Label(window, text="緑: 採用済み　青: 候補あり　灰: 未収集", padding=10).pack(anchor="w")
+        ttk.Label(window, text="青: 候補あり　灰: 未収集", padding=10).pack(anchor="w")
         grid = ttk.Frame(window, padding=10)
         grid.pack(fill="both", expand=True)
         for row, kana in enumerate(kana_rows):
             for col, ch in enumerate(kana):
                 count = counts.get(ch, 0)
-                color = "#4a9d70" if ch in accepted else "#367ca5" if count else "#59616a"
+                color = "#367ca5" if count else "#59616a"
                 button = tk.Button(grid, text=f"{ch}\n{count}", width=6, height=2, bg=color, fg="white", relief="flat", command=lambda c=ch: self._filter_label(c, window))
                 button.grid(row=row, column=col, padx=3, pady=3)
         breaths = sum(s.breath for s in self.project.segments)
-        ttk.Label(window, text=f"息・ブレス候補: {breaths}　全候補: {len(self.project.segments)}", padding=10).pack(anchor="w")
+        sighs = sum(getattr(s, "sigh", False) for s in self.project.segments)
+        ttk.Label(window, text=f"ブレス: {breaths}　息: {sighs}　全候補: {len(self.project.segments)}", padding=10).pack(anchor="w")
 
     def _filter_label(self, label: str, window: tk.Toplevel) -> None:
         self.search_var.set(label)
@@ -1838,13 +1844,6 @@ class MoraCutterApp(AppBase):
             self.current_samples = None
             self.history = History(100)
             self._dirty = False
-            saved_model = self.project.settings.detection_model
-            if saved_model not in [model.name for model in self.models]:
-                saved_model = self.models[0].name
-            self.model_var.set(saved_model)
-            self._model_selected()
-            self.gpu_var.set(self.project.settings.use_gpu)
-            self.unit_var.set(UNIT_NAMES.get(self.project.settings.unit, "モーラ"))
             self.refresh_sources()
             self._load_current_audio()
             self.title(f"Mora Cutter MVP — {Path(path).name}")
@@ -1876,9 +1875,7 @@ class MoraCutterApp(AppBase):
         return self.save()
 
     def _sync_settings(self) -> None:
-        self.project.settings.use_gpu = self.gpu_var.get()
-        self.project.settings.detection_model = self.model_var.get()
-        self.project.settings.unit = UNIT_LABELS[self.unit_var.get()]
+        """Manual edition has no per-project automatic-recognition settings."""
 
     def _recovery_folder(self) -> Path:
         return Path(self.project.settings.recovery_folder or APP_DIR / "recovery")
@@ -1916,8 +1913,7 @@ class MoraCutterApp(AppBase):
         numpy_ok = f"NumPy {np.__version__}"
         ffmpeg = shutil.which("ffmpeg") or "見つかりません"
         ffplay = shutil.which("ffplay") or "見つかりません"
-        gpu_note = "外部モデルがGPU対応の場合に利用できます（内蔵ベースラインはCPU処理）"
-        messagebox.showinfo("動作環境", f"{python_ok}\n{numpy_ok}\nFFmpeg: {ffmpeg}\nFFplay: {ffplay}\n\nGPU: {gpu_note}")
+        messagebox.showinfo("動作環境", f"{python_ok}\n{numpy_ok}\nFFmpeg: {ffmpeg}\nFFplay: {ffplay}")
 
     def _confirm_discard(self) -> bool:
         if not self._dirty:
