@@ -421,6 +421,8 @@ class MoraCutterApp(AppBase):
         self.breath_var = tk.BooleanVar()
         self.sigh_var = tk.BooleanVar()
         self.detail_entries["label"].bind("<Return>", self._detail_label_enter)
+        self.detail_entries["label"].bind("<KeyPress-c>", self._play_cue_key)
+        self.detail_entries["label"].bind("<KeyPress-C>", self._play_cue_key)
         ttk.Checkbutton(detail, text="ブレス", variable=self.breath_var, command=lambda: self.apply_voice_type("breath")).grid(row=6, column=0, columnspan=2, sticky="w")
         ttk.Checkbutton(detail, text="息", variable=self.sigh_var, command=lambda: self.apply_voice_type("sigh")).grid(row=7, column=0, columnspan=2, sticky="w")
         ttk.Button(detail, text="候補を削除", command=self.delete_segment).grid(row=8, column=0, columnspan=2, sticky="ew", pady=(8, 3))
@@ -493,8 +495,16 @@ class MoraCutterApp(AppBase):
         return "break"
 
     def _play_cue_key(self, _event: object = None) -> str | None:
-        if self._text_input_active():
+        event_widget = getattr(_event, "widget", None)
+        label_entry = getattr(self, "detail_entries", {}).get("label")
+        if self._text_input_active() and event_widget is not label_entry:
             return None
+        if self.drag_mode == "selection":
+            source = self.current_source()
+            start, end = sorted(self.selection)
+            if source and end - start >= 0.005:
+                self._play(source.path, start, end, False, preserve_pointer=True)
+            return "break"
         self.play_cue()
         return "break"
 
@@ -1062,6 +1072,7 @@ class MoraCutterApp(AppBase):
         self._play(path, start, end, self._pointer_resume_loop)
 
     def _range_press(self, event: tk.Event) -> None:
+        self.wave_canvas.focus_set()
         self.canvas_press_x = float(event.x)
         self.canvas_dragged = False
         self.current_segment_id = None
@@ -1473,8 +1484,16 @@ class MoraCutterApp(AppBase):
         if segment and source:
             self._play(source.path, max(0, segment.start-0.15), min(source.duration, segment.end+0.15), False)
 
-    def _play(self, path: str, start: float, end: float, loop: bool) -> None:
-        self.stop_audio(quiet=True)
+    def _play(self, path: str, start: float, end: float, loop: bool, preserve_pointer: bool = False) -> None:
+        if preserve_pointer:
+            player = self.player
+            self.player = None
+            self._playback_loop = False
+            self._playback_path = ""
+            if player and player.poll() is None:
+                player.terminate()
+        else:
+            self.stop_audio(quiet=True)
         speed = float(self.speed_var.get())
         gain_db = float(self.playback_gain_var.get())
         try:
