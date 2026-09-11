@@ -229,6 +229,7 @@ class MoraCutterApp(AppBase):
         self._wave_cache_peaks: np.ndarray | None = None
         self._wave_render_key: tuple[object, ...] | None = None
         self._spectrogram_cache_key: tuple[object, ...] | None = None
+        self._viewport_interacting = False
         self._dirty = False
         # 自動音声認識は現在保留（手入力切り出しに専念する版）。
         self._detection_running = False
@@ -777,7 +778,7 @@ class MoraCutterApp(AppBase):
             pass
         self.after(100, self._poll_jobs)
 
-    def draw_audio(self) -> None:
+    def draw_audio(self, interactive: bool = False) -> None:
         source = self.current_source()
         samples = self.current_samples
         if source is None or samples is None or len(samples) == 0:
@@ -793,7 +794,9 @@ class MoraCutterApp(AppBase):
         sample_start = max(0, int(view_start * DISPLAY_RATE))
         sample_end = min(len(samples), max(sample_start + 1, int(view_end * DISPLAY_RATE)))
         visible_samples = samples[sample_start:sample_end]
-        bins = min(width, len(visible_samples))
+        # During scrollbar dragging a compact envelope is enough; a full-width
+        # waveform and spectrogram are restored on release.
+        bins = min(width if not interactive else 480, len(visible_samples))
         display_gain = float(10 ** (self.wave_gain_var.get() / 20))
         # Selection, cue and playhead updates call draw_audio too.  The waveform
         # itself is immutable until its visible range, size or gain changes, so
@@ -802,6 +805,7 @@ class MoraCutterApp(AppBase):
             source.id, sample_start, sample_end, width, height,
             round(display_gain, 6), self.spectrum_expanded,
             self.spec_canvas.winfo_height() if self.spectrum_expanded else 0,
+            bins, interactive,
         )
         if render_key == self._wave_render_key:
             self._draw_overlays()
@@ -828,7 +832,7 @@ class MoraCutterApp(AppBase):
             x = self._time_to_x(float(sec), width)
             self.wave_canvas.create_line(x, 0, x, height, fill="#27313a")
             self.wave_canvas.create_text(x+3, 9, text=self._format_time(float(sec)), fill="#8e99a5", anchor="nw", font=("TkDefaultFont", 8))
-        if self.spectrum_expanded:
+        if self.spectrum_expanded and not interactive:
             spec_height = max(90, self.spec_canvas.winfo_height())
             spec_key = (source.id, sample_start, sample_end, width, spec_height)
             if spec_key != self._spectrogram_cache_key:
@@ -997,16 +1001,18 @@ class MoraCutterApp(AppBase):
             self.after_cancel(self._viewport_redraw_job)
         # A short throttle tracks the scrollbar without scheduling a redraw for
         # every individual Tk scale event.
-        self._viewport_redraw_job = self.after(16, self._redraw_viewport)
+        self._viewport_interacting = True
+        self._viewport_redraw_job = self.after(8, self._redraw_viewport)
 
     def _redraw_viewport(self) -> None:
         self._viewport_redraw_job = None
-        self.draw_audio()
+        self.draw_audio(interactive=True)
 
     def _viewport_released(self, _: tk.Event) -> None:
         if self._viewport_redraw_job is not None:
             self.after_cancel(self._viewport_redraw_job)
             self._viewport_redraw_job = None
+        self._viewport_interacting = False
         self.draw_audio()
 
     def _set_viewport_slider(self, source: AudioSource) -> None:
@@ -1915,7 +1921,7 @@ class MoraCutterApp(AppBase):
 
     def show_coverage(self) -> None:
         window = tk.Toplevel(self)
-        window.title("ローマ字表の収集状況")
+        window.title("五十音表の収集状況")
         window.geometry("760x560")
         rows = (
             ("あいうえお", ("a", "i", "u", "e", "o")), ("かきくけこ", ("ka", "ki", "ku", "ke", "ko")),
@@ -1928,17 +1934,22 @@ class MoraCutterApp(AppBase):
             ("ぱぴぷぺぽ", ("pa", "pi", "pu", "pe", "po")),
         )
         kana_to_romaji = {kana: roman for kana_row, roman_row in rows for kana, roman in zip(kana_row, roman_row)}
+        requested = {
+            kana_to_romaji.get(item.strip(), item.strip().lower())
+            for item in self.transcript_text.get("1.0", "end-1c").replace("，", ",").split(",")
+            if item.strip()
+        }
         counts: dict[str, int] = {}
         for segment in self.project.segments:
             key = kana_to_romaji.get(segment.label, segment.label.lower())
             counts[key] = counts.get(key, 0) + 1
-        ttk.Label(window, text="ローマ字を優先表示（青: 候補あり　灰: 未収集）", padding=10).pack(anchor="w")
+        ttk.Label(window, text="ローマ字を優先表示（緑: 収集用リスト　青: 候補あり　灰: 未収集）", padding=10).pack(anchor="w")
         grid = ttk.Frame(window, padding=10)
         grid.pack(fill="both", expand=True)
         for row, (kana_row, roman_row) in enumerate(rows):
             for col, (kana, roman) in enumerate(zip(kana_row, roman_row)):
                 count = counts.get(roman, 0)
-                color = "#367ca5" if count else "#59616a"
+                color = "#2e9c67" if roman in requested else "#367ca5" if count else "#59616a"
                 button = tk.Button(grid, text=f"{roman}\n{kana}  {count}", width=7, height=2, bg=color, fg="white", relief="flat", command=lambda labels={kana, roman}: self._filter_label(labels, window))
                 button.grid(row=row, column=col, padx=3, pady=3)
         breaths = sum(s.breath for s in self.project.segments)
