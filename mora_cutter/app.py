@@ -1981,6 +1981,24 @@ class MoraCutterApp(AppBase):
                 button.bind("<MouseWheel>", scroll)
                 button.bind("<Button-4>", scroll)
                 button.bind("<Button-5>", scroll)
+        # Keep the ordinary chart compact, but surface requested phonemes such
+        # as "ye" that are not part of the built-in gojuon rows.
+        built_in = set(kana_to_romaji.values())
+        extras = sorted(requested - built_in)
+        if extras:
+            extra_row = len(rows) + 1
+            ttk.Label(grid, text="収集用リストのみ", padding=(2, 9, 2, 2)).grid(row=extra_row, column=0, columnspan=5, sticky="w")
+            for index, label in enumerate(extras):
+                count = counts.get(label, 0)
+                color, foreground = ("#2e9c67", "white") if count else ("#f2c94c", "#1d242b")
+                button = tk.Button(
+                    grid, text=f"{label}\n{count}", width=7, height=2, bg=color, fg=foreground,
+                    relief="flat", command=lambda labels={label}: self._filter_label(labels, window),
+                )
+                button.grid(row=extra_row + 1 + index // 5, column=index % 5, padx=3, pady=3)
+                button.bind("<MouseWheel>", scroll)
+                button.bind("<Button-4>", scroll)
+                button.bind("<Button-5>", scroll)
         breaths = sum(s.breath for s in self.project.segments)
         sighs = sum(getattr(s, "sigh", False) for s in self.project.segments)
         ttk.Label(window, text=f"ブレス: {breaths}　息: {sighs}　全候補: {len(self.project.segments)}", padding=10).pack(anchor="w")
