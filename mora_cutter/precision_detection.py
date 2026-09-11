@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gc
 import math
+import os
 import re
 import shutil
 import subprocess
@@ -59,13 +60,18 @@ def _write_wav(source: str, target: Path) -> None:
 
 
 def _mfa_command() -> list[str]:
-    """Find a working MFA command, preferring the dedicated Conda environment."""
-    direct = shutil.which("mfa") or shutil.which("mfa.exe")
-    candidates: list[list[str]] = [[direct]] if direct else []
+    """Find MFA, preferring the dedicated Conda environment.
+
+    MFA imports its Japanese tokenizer even for ``--help``.  On slower disks
+    that probe can take longer than the UI's startup timeout, so a known
+    dedicated environment is trusted and the real command reports any error.
+    """
     for candidate in (Path.home()/"miniforge3"/"envs"/"moracutter-mfa"/"Scripts"/"mfa.exe",
                       Path.home()/"mambaforge"/"envs"/"moracutter-mfa"/"Scripts"/"mfa.exe"):
         if candidate.is_file():
-            candidates.append([str(candidate)])
+            return [str(candidate)]
+    direct = shutil.which("mfa") or shutil.which("mfa.exe")
+    candidates: list[list[str]] = [[direct]] if direct else []
     conda = shutil.which("conda") or shutil.which("conda.exe")
     if not conda:
         for candidate in (Path.home()/"miniforge3"/"Scripts"/"conda.exe", Path.home()/"mambaforge"/"Scripts"/"conda.exe"):
@@ -83,6 +89,22 @@ def _mfa_command() -> list[str]:
         "MFAの実行環境がありません。Python 3.13へpipで入れたMFAはKalpyを含まないため使用できません。"
         "Miniforge/Condaを導入後、setup_mfa.batを実行してください。"
     )
+
+
+def _mfa_environment(command: list[str]) -> dict[str, str] | None:
+    """Expose the dedicated Conda environment's SoX/Kaldi binaries to MFA."""
+    if len(command) != 1:
+        return None
+    executable_path = Path(command[0])
+    if executable_path.name.lower() != "mfa.exe" or executable_path.parent.name.lower() != "scripts":
+        return None
+    root = executable_path.parent.parent
+    if not (root / "conda-meta").is_dir():
+        return None
+    environment = os.environ.copy()
+    additions = (root / "Library" / "bin", root / "Scripts", root)
+    environment["PATH"] = os.pathsep.join(str(path) for path in additions) + os.pathsep + environment.get("PATH", "")
+    return environment
 
 
 def _mfa_intervals(path: Path) -> list[tuple[float, float, str]]:
@@ -114,9 +136,17 @@ def mfa_detect(path: str, source_id: str, transcript: str, unit: str, cache_root
         raise RuntimeError("MFA解析には素材のテキストが必要です。")
     mfa = _mfa_command()
     def run(args: list[str]) -> None:
-        done = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", **_hidden_subprocess_kwargs())
+        done = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              env=_mfa_environment(mfa), **_hidden_subprocess_kwargs())
         if done.returncode:
-            raise RuntimeError((done.stderr or done.stdout).strip())
+            detail = (done.stderr or done.stdout).strip()
+            if "Numba could not be imported" in detail or "No utterances had features" in detail:
+                raise RuntimeError(
+                    "MFAの特徴量生成をWindowsのアプリケーション制御がブロックしました。"
+                    "Conda環境内のNumba DLLを許可してから再実行してください。"
+                    "（モデルまたは歌詞が原因ではありません。）"
+                )
+            raise RuntimeError(detail)
     report(5, "MFA: Japanese v3.0.0を確認中")
     # MFA resolves the Japanese v3.0.0 acoustic model and dictionary under
     # the stable japanese_mfa model name.  The CLI does not accept a version
