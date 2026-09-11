@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from collections import Counter
 from datetime import datetime
 import json
 import math
@@ -226,6 +227,7 @@ class MoraCutterApp(AppBase):
         self._spectrogram_photo: tk.PhotoImage | None = None
         self._wave_cache_key: tuple[object, ...] | None = None
         self._wave_cache_peaks: np.ndarray | None = None
+        self._wave_render_key: tuple[object, ...] | None = None
         self._spectrogram_cache_key: tuple[object, ...] | None = None
         self._dirty = False
         # 自動音声認識は現在保留（手入力切り出しに専念する版）。
@@ -426,6 +428,7 @@ class MoraCutterApp(AppBase):
         search = ttk.Entry(search_row, textvariable=self.search_var, width=22)
         search.pack(side="right")
         ttk.Label(search_row, text="検索 ").pack(side="right")
+        ttk.Button(search_row, text="全表示", command=self._clear_coverage_filter).pack(side="right", padx=(0, 5))
         self.search_var.trace_add("write", self._search_changed)
 
         columns = ("label", "pitch", "start", "end")
@@ -466,7 +469,7 @@ class MoraCutterApp(AppBase):
         ttk.Checkbutton(detail, text="息", variable=self.sigh_var, command=lambda: self.apply_voice_type("sigh")).grid(row=7, column=0, columnspan=2, sticky="w")
         ttk.Button(detail, text="候補を削除", command=self.delete_segment).grid(row=8, column=0, columnspan=2, sticky="ew", pady=(8, 3))
 
-        transcript_frame = ttk.LabelFrame(lower, text="素材のテキスト（任意）", padding=7)
+        transcript_frame = ttk.LabelFrame(lower, text="収集用リスト（, で区切る）", padding=7)
         lower.add(transcript_frame, weight=2)
         self.transcript_text = tk.Text(transcript_frame, width=28, height=8, wrap="word", undo=True)
         self.transcript_text.pack(fill="both", expand=True)
