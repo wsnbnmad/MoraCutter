@@ -41,6 +41,39 @@ APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
 UNIT_LABELS = {"モーラ": "mora", "一文字": "character", "音素": "phoneme"}
 UNIT_NAMES = {value: key for key, value in UNIT_LABELS.items()}
 
+# Canonical spelling used by the shared collection list.  Manual labels may be
+# entered in either kana or romaji, so counting must not treat あ and a as
+# different sounds.
+KANA_TO_ROMAJI = {
+    kana: roman
+    for kana_row, roman_row in (
+        (("あ", "い", "う", "え", "お"), ("a", "i", "u", "e", "o")),
+        (("か", "き", "く", "け", "こ"), ("ka", "ki", "ku", "ke", "ko")),
+        (("さ", "し", "す", "せ", "そ"), ("sa", "shi", "su", "se", "so")),
+        (("た", "ち", "つ", "て", "と"), ("ta", "chi", "tsu", "te", "to")),
+        (("な", "に", "ぬ", "ね", "の"), ("na", "ni", "nu", "ne", "no")),
+        (("は", "ひ", "ふ", "へ", "ほ"), ("ha", "hi", "fu", "he", "ho")),
+        (("ま", "み", "む", "め", "も"), ("ma", "mi", "mu", "me", "mo")),
+        (("や", "ゆ", "よ"), ("ya", "yu", "yo")), (("ら", "り", "る", "れ", "ろ"), ("ra", "ri", "ru", "re", "ro")),
+        (("わ", "を", "ん"), ("wa", "wo", "n")), (("が", "ぎ", "ぐ", "げ", "ご"), ("ga", "gi", "gu", "ge", "go")),
+        (("ざ", "じ", "ず", "ぜ", "ぞ"), ("za", "ji", "zu", "ze", "zo")), (("だ", "ぢ", "づ", "で", "ど"), ("da", "ji", "zu", "de", "do")),
+        (("ば", "び", "ぶ", "べ", "ぼ"), ("ba", "bi", "bu", "be", "bo")), (("ぱ", "ぴ", "ぷ", "ぺ", "ぽ"), ("pa", "pi", "pu", "pe", "po")),
+        (("きゃ", "きゅ", "きょ"), ("kya", "kyu", "kyo")), (("ぎゃ", "ぎゅ", "ぎょ"), ("gya", "gyu", "gyo")),
+        (("しゃ", "しゅ", "しょ"), ("sha", "shu", "sho")), (("じゃ", "じゅ", "じょ"), ("ja", "ju", "jo")),
+        (("ちゃ", "ちゅ", "ちょ"), ("cha", "chu", "cho")), (("にゃ", "にゅ", "にょ"), ("nya", "nyu", "nyo")),
+        (("ひゃ", "ひゅ", "ひょ"), ("hya", "hyu", "hyo")), (("びゃ", "びゅ", "びょ"), ("bya", "byu", "byo")),
+        (("ぴゃ", "ぴゅ", "ぴょ"), ("pya", "pyu", "pyo")), (("みゃ", "みゅ", "みょ"), ("mya", "myu", "myo")),
+        (("りゃ", "りゅ", "りょ"), ("rya", "ryu", "ryo")),
+    )
+    for kana, roman in zip(kana_row, roman_row)
+}
+ROMAJI_ALIASES = {"si": "shi", "ti": "chi", "tu": "tsu", "hu": "fu", "zi": "ji", "di": "ji", "du": "zu"}
+
+
+def _canonical_pronunciation(value: str) -> str:
+    value = value.strip().lower()
+    return KANA_TO_ROMAJI.get(value, ROMAJI_ALIASES.get(value, value))
+
 
 def _peak_envelope(samples: np.ndarray, bins: int) -> np.ndarray:
     """Return one absolute peak per screen column without Python-level loops."""
@@ -1701,18 +1734,19 @@ class MoraCutterApp(AppBase):
             self.mora_preview.config(text="収集用リスト: 0件\n発音を , で区切って入力します")
             return
         collected = Counter(
-            segment.label.strip()
+            _canonical_pronunciation(segment.label)
             for segment in self.project.segments
             if segment.label.strip()
             and segment.label not in {"未分類", "(息)", "(ブレス)"}
         )
-        remaining = Counter(requested)
+        remaining = Counter(_canonical_pronunciation(label) for label in requested)
         remaining.subtract(collected)
         missing: list[str] = []
         for label in requested:
-            if remaining[label] > 0:
+            canonical = _canonical_pronunciation(label)
+            if remaining[canonical] > 0:
                 missing.append(label)
-                remaining[label] -= 1
+                remaining[canonical] -= 1
         # Preserve the list's original order, including duplicated requested
         # sounds, while showing only entries that still need collecting.
         if missing:
@@ -1939,13 +1973,13 @@ class MoraCutterApp(AppBase):
         )
         kana_to_romaji = {kana: roman for kana_row, roman_row in rows for kana, roman in zip(kana_row, roman_row)}
         requested = {
-            kana_to_romaji.get(item.strip(), item.strip().lower())
+            _canonical_pronunciation(item)
             for item in self.transcript_text.get("1.0", "end-1c").replace("，", ",").split(",")
             if item.strip()
         }
         counts: dict[str, int] = {}
         for segment in self.project.segments:
-            key = kana_to_romaji.get(segment.label, segment.label.lower())
+            key = _canonical_pronunciation(segment.label)
             counts[key] = counts.get(key, 0) + 1
         ttk.Label(window, text="ローマ字を優先表示（緑: リスト内・収集済み　黄: リスト内・未収集　青: 候補あり　灰: 未収集）", padding=10).pack(anchor="w")
         body = ttk.Frame(window)
