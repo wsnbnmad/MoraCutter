@@ -285,6 +285,7 @@ class MoraCutterApp(AppBase):
         self.after(1000, self._schedule_autosave)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._offer_recovery()
+        self.after(80, self._restore_startup_focus)
 
     def _build_style(self) -> None:
         style = ttk.Style(self)
@@ -292,6 +293,16 @@ class MoraCutterApp(AppBase):
             style.theme_use("clam")
         style.configure("Treeview", rowheight=25)
         style.configure("Accent.TButton", font=("TkDefaultFont", 10, "bold"))
+
+    def _restore_startup_focus(self) -> None:
+        """Make the freshly launched desktop window ready for typing."""
+        try:
+            self.deiconify()
+            self.lift()
+            self.focus_force()
+            self.search_entry.focus_set()
+        except tk.TclError:
+            pass
 
     def _build_menu(self) -> None:
         bar = tk.Menu(self)
@@ -465,6 +476,7 @@ class MoraCutterApp(AppBase):
         ttk.Button(search_row, text="選択を解除", command=lambda: self._set_selected_export_checks(False)).pack(side="left", padx=2)
         self.search_var = tk.StringVar()
         search = ttk.Entry(search_row, textvariable=self.search_var, width=22)
+        self.search_entry = search
         search.pack(side="right")
         ttk.Label(search_row, text="検索 ").pack(side="right")
         ttk.Button(search_row, text="全表示", command=self._clear_coverage_filter).pack(side="right", padx=(0, 5))
@@ -1466,8 +1478,9 @@ class MoraCutterApp(AppBase):
             # from rebuilding an unfiltered list.
             segments: list[Segment] = []
             for segment in self.project.segments:
-                source_name = source_names.get(segment.source_id, "（素材なし）")
-                haystack = f"{segment.label} {_canonical_pronunciation(segment.label)} {source_name} {segment.pitch}".lower()
+                # Search is intentionally limited to pronunciation; source
+                # names and pitch are visible columns, not search keys.
+                haystack = f"{segment.label} {_canonical_pronunciation(segment.label)}".lower()
                 if self._coverage_filter_labels is not None and segment.label not in self._coverage_filter_labels:
                     continue
                 if query and query not in haystack:
