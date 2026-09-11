@@ -68,6 +68,10 @@ class Project:
     name: str = "名称未設定"
     sources: list[AudioSource] = field(default_factory=list)
     segments: list[Segment] = field(default_factory=list)
+    # Shared across every source: this is a collection target list, not a
+    # per-file transcript.  Keep transcripts for compatibility with older
+    # projects and the currently disabled recognition workflow.
+    collection_list: str = ""
     transcripts: dict[str, str] = field(default_factory=dict)
     settings: ProjectSettings = field(default_factory=ProjectSettings)
 
@@ -76,6 +80,12 @@ class Project:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "Project":
+        transcripts = dict(raw.get("transcripts", {}))
+        collection_list = str(raw.get("collection_list", ""))
+        # Upgrade previous projects without discarding a list entered in the
+        # former per-source field.
+        if not collection_list:
+            collection_list = next((value for value in transcripts.values() if value.strip()), "")
         return cls(
             version=int(raw.get("version", 1)),
             name=raw.get("name", "名称未設定"),
@@ -86,6 +96,7 @@ class Project:
                 key: value for key, value in v.items()
                 if key in Segment.__dataclass_fields__
             }) for v in raw.get("segments", [])],
-            transcripts=dict(raw.get("transcripts", {})),
+            collection_list=collection_list,
+            transcripts=transcripts,
             settings=ProjectSettings(**raw.get("settings", {})),
         )

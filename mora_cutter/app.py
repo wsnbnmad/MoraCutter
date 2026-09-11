@@ -644,7 +644,6 @@ class MoraCutterApp(AppBase):
         self._record()
         self.project.sources = [s for s in self.project.sources if s.id != source.id]
         self.project.segments = [s for s in self.project.segments if s.source_id != source.id]
-        self.project.transcripts.pop(source.id, None)
         self.current_source_id = self.project.sources[0].id if self.project.sources else None
         self.current_samples = None
         self._after_project_change("素材を除外しました")
@@ -690,7 +689,7 @@ class MoraCutterApp(AppBase):
             return
         self.source_title.config(text=f"{source.display_name}  •  {self._format_time(source.duration)}  •  {source.sample_rate} Hz")
         self.transcript_text.delete("1.0", "end")
-        self.transcript_text.insert("1.0", self.project.transcripts.get(source.id, ""))
+        self.transcript_text.insert("1.0", self.project.collection_list)
         self._update_mora_preview()
         self._set_progress(0, f"表示準備: {source.display_name}")
         source_id = source.id
@@ -1690,11 +1689,9 @@ class MoraCutterApp(AppBase):
         self.after(33, self._update_playhead)
 
     def _save_transcript(self) -> None:
-        if not self.current_source_id:
-            return
         value = self.transcript_text.get("1.0", "end-1c")
-        if self.project.transcripts.get(self.current_source_id, "") != value:
-            self.project.transcripts[self.current_source_id] = value
+        if self.project.collection_list != value:
+            self.project.collection_list = value
             self._dirty = True
 
     def _update_mora_preview(self) -> None:
@@ -1706,8 +1703,7 @@ class MoraCutterApp(AppBase):
         collected = Counter(
             segment.label.strip()
             for segment in self.project.segments
-            if segment.source_id == self.current_source_id
-            and segment.label.strip()
+            if segment.label.strip()
             and segment.label not in {"未分類", "(息)", "(ブレス)"}
         )
         remaining = Counter(requested)
