@@ -449,6 +449,7 @@ class MoraCutterApp(AppBase):
         ttk.Label(status, textvariable=self.secondary_status_var, anchor="w", foreground="#68727d").pack(fill="x")
 
     def _bind_keys(self) -> None:
+        self.bind_all("<Button-1>", self._release_text_focus_on_outer_click, add="+")
         self.bind_all("<Control-n>", lambda _: self.new_project())
         self.bind_all("<Control-o>", lambda _: self.open_project())
         self.bind_all("<Control-s>", lambda _: self.save())
@@ -470,6 +471,15 @@ class MoraCutterApp(AppBase):
 
     def _text_input_active(self) -> bool:
         return isinstance(self.focus_get(), (tk.Entry, tk.Text, ttk.Entry, ttk.Combobox))
+
+    def _release_text_focus_on_outer_click(self, event: tk.Event) -> None:
+        """Let transport shortcuts work again after clicking outside an entry."""
+        widget = event.widget
+        if widget.winfo_toplevel() is not self:
+            return
+        if isinstance(widget, (tk.Entry, tk.Text, ttk.Entry, ttk.Combobox)):
+            return
+        self.wave_canvas.focus_set()
 
     def _toggle_playback(self, _event: object = None) -> str | None:
         if self._text_input_active():
