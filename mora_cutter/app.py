@@ -446,8 +446,7 @@ class MoraCutterApp(AppBase):
         action_row = ttk.Frame(visual, padding=(0, 6))
         self.action_row = action_row
         action_row.pack(fill="x")
-        ttk.Button(action_row, text="前後付き再生", command=self.play_context).pack(side="left")
-        self.wave_help_label = ttk.Label(action_row, text="  左ドラッグ: 再生位置 / 右ドラッグ: 範囲選択 / 詳細の発音欄でEnter: 候補追加")
+        self.wave_help_label = ttk.Label(action_row, text="左ドラッグ: 再生位置 / 右ドラッグ: 範囲選択 / 詳細の発音欄でEnter: 候補追加")
         self.wave_help_label.pack(side="left")
 
         lower = ttk.Panedwindow(center_right, orient="horizontal")
@@ -1729,26 +1728,26 @@ class MoraCutterApp(AppBase):
 
     def _update_mora_preview(self) -> None:
         raw = self.transcript_text.get("1.0", "end-1c")
-        requested = [item.strip() for item in raw.replace("，", ",").split(",") if item.strip()]
+        requested: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for item in raw.replace("，", ",").split(","):
+            label = item.strip()
+            canonical = _canonical_pronunciation(label)
+            if label and canonical not in seen:
+                requested.append((label, canonical))
+                seen.add(canonical)
         if not requested:
             self.mora_preview.config(text="収集用リスト: 0件\n発音を , で区切って入力します")
             return
-        collected = Counter(
+        collected = {
             _canonical_pronunciation(segment.label)
             for segment in self.project.segments
             if segment.label.strip()
             and segment.label not in {"未分類", "(息)", "(ブレス)"}
-        )
-        remaining = Counter(_canonical_pronunciation(label) for label in requested)
-        remaining.subtract(collected)
-        missing: list[str] = []
-        for label in requested:
-            canonical = _canonical_pronunciation(label)
-            if remaining[canonical] > 0:
-                missing.append(label)
-                remaining[canonical] -= 1
-        # Preserve the list's original order, including duplicated requested
-        # sounds, while showing only entries that still need collecting.
+        }
+        missing = [label for label, canonical in requested if canonical not in collected]
+        # A collection target represents one required pronunciation. Repeating
+        # it in the comma-separated list does not require duplicate samples.
         if missing:
             shown = ", ".join(missing[:24]) + (" …" if len(missing) > 24 else "")
             self.mora_preview.config(text=f"不足: {len(missing)} / {len(requested)}\n{shown}")
