@@ -203,6 +203,8 @@ class MoraCutterApp(AppBase):
         self.canvas_press_x = 0.0
         self.canvas_dragged = False
         self._scrub_was_playing = False
+        self._pointer_resume_end = 0.0
+        self._pointer_resume_loop = False
         self.history = History(100)
         self.player: subprocess.Popen[bytes] | None = None
         self.playhead_time = 0.0
@@ -994,6 +996,8 @@ class MoraCutterApp(AppBase):
             elif abs(time-segment.cue) <= tolerance:
                 marker = "cue"
             if marker:
+                if marker == "end":
+                    self._suspend_playback_for_pointer_adjustment()
                 self._record()
                 self.drag_mode = marker
                 self.wave_canvas.config(cursor="sb_h_double_arrow")
@@ -1007,9 +1011,7 @@ class MoraCutterApp(AppBase):
                 self.wave_canvas.config(cursor="sb_h_double_arrow")
                 return
         self.drag_mode = "playhead"
-        self._scrub_was_playing = self.player is not None and self.player.poll() is None
-        if self._scrub_was_playing:
-            self.stop_audio()
+        self._suspend_playback_for_pointer_adjustment()
         self._set_playhead_position(self._x_to_time(event.x))
 
     def _canvas_drag(self, event: tk.Event) -> None:
@@ -1044,11 +1046,15 @@ class MoraCutterApp(AppBase):
             self._set_playhead_position(self._x_to_time(event.x))
             source = self.current_source()
             if self._scrub_was_playing and source:
-                self._play(source.path, self.playhead_time, source.duration, False)
+                self._resume_pointer_playback(source.path, self.playhead_time, self._pointer_resume_end)
         elif self.drag_mode in ("start", "cue", "end"):
+            segment = self.draft_segment or self.current_segment()
             self._dirty = True
             self.refresh_segments()
             self.status_var.set("開始・cue・終了位置を調整しました")
+            source = self.current_source()
+            if self.drag_mode == "end" and self._scrub_was_playing and segment and source:
+                self._resume_pointer_playback(source.path, self.playhead_time, segment.end)
         elif self.drag_mode in ("selection_start", "selection_end"):
             start, end = sorted(self.selection)
             self.status_var.set(f"切り出し範囲を調整: {start:.3f}–{end:.3f}秒。Fキーで発音を入力します")
@@ -1060,6 +1066,26 @@ class MoraCutterApp(AppBase):
         self._scrub_was_playing = False
         self.wave_canvas.config(cursor="crosshair")
         self._draw_overlays()
+
+    def _suspend_playback_for_pointer_adjustment(self) -> None:
+        """Stop the process without resetting the cue, ready to resume on release."""
+        player = self.player
+        self._scrub_was_playing = player is not None and player.poll() is None
+        self._pointer_resume_end = self._playback_end
+        self._pointer_resume_loop = self._playback_loop
+        if self._scrub_was_playing:
+            player.terminate()
+            self.player = None
+            self._playback_loop = False
+            self._playback_path = ""
+
+    def _resume_pointer_playback(self, path: str, start: float, end: float) -> None:
+        """Resume a pointer-adjusted clip while keeping its original loop mode."""
+        if end <= start + 0.001:
+            self.playhead_time = max(0.0, end)
+            self._draw_overlays()
+            return
+        self._play(path, start, end, self._pointer_resume_loop)
 
     def _range_press(self, event: tk.Event) -> None:
         self.canvas_press_x = float(event.x)
