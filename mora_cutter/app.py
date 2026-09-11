@@ -279,7 +279,7 @@ class MoraCutterApp(AppBase):
         toolbar = ttk.Frame(self, padding=(8, 7))
         toolbar.pack(fill="x")
         ttk.Button(toolbar, text="＋ 音声を追加", command=self.add_audio).pack(side="left")
-        self.play_button = ttk.Button(toolbar, text="▶ cueから再生", command=self.play_cue)
+        self.play_button = ttk.Button(toolbar, text="▶ cueから再生 (C)", command=self.play_cue)
         self.play_button.pack(side="left", padx=(8, 0))
         self.stop_button = ttk.Button(toolbar, text="■ 停止", command=self.stop_audio)
         self.stop_button.pack(side="left", padx=(4, 0))
@@ -494,8 +494,8 @@ class MoraCutterApp(AppBase):
         self.bind_all("<KeyPress-F>", self._show_flick_pad_key)
         self.bind_all("<KeyPress-s>", lambda _e: self.set_draft_marker("start"))
         self.bind_all("<KeyPress-S>", lambda _e: self.set_draft_marker("start"))
-        self.bind_all("<KeyPress-c>", lambda _e: self.set_draft_marker("cue"))
-        self.bind_all("<KeyPress-C>", lambda _e: self.set_draft_marker("cue"))
+        self.bind_all("<KeyPress-c>", self._play_cue_key)
+        self.bind_all("<KeyPress-C>", self._play_cue_key)
         self.bind_all("<KeyPress-e>", lambda _e: self.set_draft_marker("end"))
         self.bind_all("<KeyPress-E>", lambda _e: self.set_draft_marker("end"))
         self.bind_all("<Return>", self._commit_key)
@@ -512,6 +512,12 @@ class MoraCutterApp(AppBase):
             source = self.current_source()
             if source:
                 self._play(source.path, self.playhead_time, min(source.duration, self.playhead_time + 8.0), False)
+        return "break"
+
+    def _play_cue_key(self, _event: object = None) -> str | None:
+        if self._text_input_active():
+            return None
+        self.play_cue()
         return "break"
 
     def _commit_key(self, _event: object = None) -> str | None:
@@ -1462,8 +1468,18 @@ class MoraCutterApp(AppBase):
         self._playback_path = ""
         if player and player.poll() is None:
             player.terminate()
+        segment = self.current_segment()
+        source = self.current_source()
+        if source:
+            if segment is not None:
+                self.playhead_time = segment.cue
+            else:
+                start, end = sorted(self.selection)
+                if end - start >= 0.005:
+                    self.playhead_time = start
+            self._draw_overlays()
         if not quiet and hasattr(self, "status_var"):
-            self.status_var.set("停止しました")
+            self.status_var.set(f"停止しました（cue: {self.playhead_time:.3f}秒）")
 
     def _update_playhead(self) -> None:
         player = self.player
@@ -1484,6 +1500,7 @@ class MoraCutterApp(AppBase):
                 except Exception as exc:
                     self.status_var.set(f"ループ再生を続けられません: {exc}")
             self.player = None
+            self.playhead_time = self._playback_start
             self._draw_overlays()
             return
         elapsed = (time.monotonic() - self._playback_started_at) * self._playback_speed
