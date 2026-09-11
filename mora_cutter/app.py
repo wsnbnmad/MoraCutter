@@ -474,7 +474,7 @@ class MoraCutterApp(AppBase):
         self.transcript_text = tk.Text(transcript_frame, width=28, height=8, wrap="word", undo=True)
         self.transcript_text.pack(fill="both", expand=True)
         self.transcript_text.bind("<FocusOut>", lambda _: self._save_transcript())
-        self.mora_preview = ttk.Label(transcript_frame, text="モーラ: 0", wraplength=280, justify="left")
+        self.mora_preview = ttk.Label(transcript_frame, text="収集用リスト: 0件", wraplength=280, justify="left")
         self.mora_preview.pack(fill="x", pady=(5, 0))
         self.transcript_text.bind("<KeyRelease>", lambda _: self._update_mora_preview())
 
@@ -601,6 +601,7 @@ class MoraCutterApp(AppBase):
         self._dirty = True
         self.refresh_sources()
         self.refresh_segments()
+        self._update_mora_preview()
         self.draw_audio()
         self.status_var.set(status)
 
@@ -793,6 +794,18 @@ class MoraCutterApp(AppBase):
         sample_end = min(len(samples), max(sample_start + 1, int(view_end * DISPLAY_RATE)))
         visible_samples = samples[sample_start:sample_end]
         bins = min(width, len(visible_samples))
+        display_gain = float(10 ** (self.wave_gain_var.get() / 20))
+        # Selection, cue and playhead updates call draw_audio too.  The waveform
+        # itself is immutable until its visible range, size or gain changes, so
+        # keep that expensive layer on the Canvas and redraw overlays only.
+        render_key = (
+            source.id, sample_start, sample_end, width, height,
+            round(display_gain, 6), self.spectrum_expanded,
+            self.spec_canvas.winfo_height() if self.spectrum_expanded else 0,
+        )
+        if render_key == self._wave_render_key:
+            self._draw_overlays()
+            return
         cache_key = (source.id, sample_start, sample_end, bins)
         if cache_key == self._wave_cache_key and self._wave_cache_peaks is not None:
             peaks = self._wave_cache_peaks
@@ -801,7 +814,6 @@ class MoraCutterApp(AppBase):
             self._wave_cache_key = cache_key
             self._wave_cache_peaks = peaks
         x = np.linspace(0, max(0, width-1), len(peaks), dtype=np.float32)
-        display_gain = float(10 ** (self.wave_gain_var.get() / 20))
         amplitude = np.clip(peaks * display_gain, 0.0, 1.0) * (height * 0.43)
         upper = np.column_stack((x, middle-amplitude)).ravel().tolist()
         lower = np.column_stack((x, middle+amplitude)).ravel().tolist()
@@ -822,11 +834,13 @@ class MoraCutterApp(AppBase):
             if spec_key != self._spectrogram_cache_key:
                 self._draw_spectrogram(visible_samples, width, spec_height)
                 self._spectrogram_cache_key = spec_key
+        self._wave_render_key = render_key
         self._draw_overlays()
 
     def _clear_visual_cache(self) -> None:
         self._wave_cache_key = None
         self._wave_cache_peaks = None
+        self._wave_render_key = None
         self._spectrogram_cache_key = None
         self._spectrogram_photo = None
 
@@ -981,7 +995,9 @@ class MoraCutterApp(AppBase):
         self.viewport_start = float(raw) * max(0.0, source.duration-visible)
         if self._viewport_redraw_job is not None:
             self.after_cancel(self._viewport_redraw_job)
-        self._viewport_redraw_job = self.after(45, self._redraw_viewport)
+        # A short throttle tracks the scrollbar without scheduling a redraw for
+        # every individual Tk scale event.
+        self._viewport_redraw_job = self.after(16, self._redraw_viewport)
 
     def _redraw_viewport(self) -> None:
         self._viewport_redraw_job = None
@@ -1676,10 +1692,32 @@ class MoraCutterApp(AppBase):
             self._dirty = True
 
     def _update_mora_preview(self) -> None:
-        text = self.transcript_text.get("1.0", "end-1c")
-        labels = labels_for_unit(text, "mora")
-        preview = " / ".join(labels[:30]) + (" …" if len(labels) > 30 else "")
-        self.mora_preview.config(text=f"モーラ: {len(labels)}\n{preview}")
+        raw = self.transcript_text.get("1.0", "end-1c")
+        requested = [item.strip() for item in raw.replace("，", ",").split(",") if item.strip()]
+        if not requested:
+            self.mora_preview.config(text="収集用リスト: 0件\n発音を , で区切って入力します")
+            return
+        collected = Counter(
+            segment.label.strip()
+            for segment in self.project.segments
+            if segment.source_id == self.current_source_id
+            and segment.label.strip()
+            and segment.label not in {"未分類", "(息)", "(ブレス)"}
+        )
+        remaining = Counter(requested)
+        remaining.subtract(collected)
+        missing: list[str] = []
+        for label in requested:
+            if remaining[label] > 0:
+                missing.append(label)
+                remaining[label] -= 1
+        # Preserve the list's original order, including duplicated requested
+        # sounds, while showing only entries that still need collecting.
+        if missing:
+            shown = ", ".join(missing[:24]) + (" …" if len(missing) > 24 else "")
+            self.mora_preview.config(text=f"不足: {len(missing)} / {len(requested)}\n{shown}")
+        else:
+            self.mora_preview.config(text=f"不足なし: {len(requested)}件すべて収集済み")
 
     '''
     # 自動音声認識は手入力ワークフローを安定させる間、保留。
@@ -1912,6 +1950,14 @@ class MoraCutterApp(AppBase):
         self._coverage_filter_labels = labels
         self.refresh_segments()
         window.destroy()
+
+    def _clear_coverage_filter(self) -> None:
+        """Return from a kana-table filter to the complete list."""
+        self._coverage_filter_labels = None
+        if self.search_var.get():
+            self.search_var.set("")
+        else:
+            self.refresh_segments()
 
     def show_settings(self) -> None:
         window = tk.Toplevel(self)
