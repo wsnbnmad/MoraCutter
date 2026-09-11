@@ -469,12 +469,12 @@ class MoraCutterApp(AppBase):
         ttk.Button(search_row, text="全表示", command=self._clear_coverage_filter).pack(side="right", padx=(0, 5))
         self.search_var.trace_add("write", self._search_changed)
 
-        columns = ("export", "label", "pitch", "start", "end")
+        columns = ("export", "label", "source", "pitch", "start", "end")
         self.segment_tree = ttk.Treeview(candidates, columns=columns, show="headings", selectmode="extended")
-        headings = {"export":"書出", "label":"発音", "pitch":"音程", "start":"開始", "end":"終了"}
-        widths = {"export":46, "label":120, "pitch":70, "start":95, "end":95}
+        headings = {"export":"書出", "label":"発音", "source":"素材", "pitch":"音程", "start":"開始", "end":"終了"}
+        widths = {"export":46, "label":105, "source":165, "pitch":70, "start":95, "end":95}
         for key in columns:
-            command = (lambda column=key: self._sort_list(column)) if key in {"label", "pitch", "start"} else None
+            command = (lambda column=key: self._sort_list(column)) if key in {"label", "source", "pitch", "start"} else None
             if command is None:
                 self.segment_tree.heading(key, text=headings[key])
             else:
@@ -706,6 +706,7 @@ class MoraCutterApp(AppBase):
         self._save_transcript()
         self.current_source_id = self.project.sources[indexes[0]].id
         self.current_segment_id = None
+        self.segment_tree.selection_remove(self.segment_tree.selection())
         self.draft_segment = None
         self.manual_next_start = 0.0
         self.playhead_time = 0.0
@@ -1456,9 +1457,11 @@ class MoraCutterApp(AppBase):
         previously_selected = set(self.segment_tree.selection())
         self.segment_tree.delete(*self.segment_tree.get_children())
         query = self.search_var.get().lower().strip()
-        segments = [s for s in self.project.segments if s.source_id == self.current_source_id]
+        segments = list(self.project.segments)
+        source_names = {source.id: Path(source.path).name for source in self.project.sources}
         key_functions = {
             "label": lambda item: (item.label.lower(), item.start, item.order),
+            "source": lambda item: (source_names.get(item.source_id, ""), item.start, item.order),
             "pitch": lambda item: (item.pitch.lower(), item.start, item.order),
             "start": lambda item: (item.start, item.order),
         }
@@ -1466,7 +1469,8 @@ class MoraCutterApp(AppBase):
         duplicate_numbers: dict[str, int] = {}
         for segment in segments:
             duplicate_numbers[segment.label] = duplicate_numbers.get(segment.label, 0) + 1
-            haystack = f"{segment.label} {segment.pitch}".lower()
+            source_name = source_names.get(segment.source_id, "（素材なし）")
+            haystack = f"{segment.label} {source_name} {segment.pitch}".lower()
             if self._coverage_filter_labels is not None and segment.label not in self._coverage_filter_labels:
                 continue
             if query and query not in haystack:
@@ -1474,7 +1478,7 @@ class MoraCutterApp(AppBase):
             occurrence = duplicate_numbers[segment.label]
             display_label = segment.label if occurrence == 1 else f"{segment.label} ({occurrence})"
             mark = "☑" if segment.id in self.export_checked_ids else "☐"
-            self.segment_tree.insert("", "end", iid=segment.id, values=(mark, display_label, segment.pitch, f"{segment.start:.3f}", f"{segment.end:.3f}"))
+            self.segment_tree.insert("", "end", iid=segment.id, values=(mark, display_label, source_name, segment.pitch, f"{segment.start:.3f}", f"{segment.end:.3f}"))
         restored = [segment_id for segment_id in previously_selected if self.segment_tree.exists(segment_id)]
         if restored:
             self.segment_tree.selection_set(restored)
@@ -1532,9 +1536,19 @@ class MoraCutterApp(AppBase):
         ids = self.segment_tree.selection()
         if not ids:
             return
-        self.current_segment_id = ids[0]
+        focused = self.segment_tree.focus()
+        self.current_segment_id = focused if focused in ids else ids[0]
         segment = self.current_segment()
         if segment:
+            if segment.source_id != self.current_source_id:
+                self._save_transcript()
+                self.current_source_id = segment.source_id
+                self.current_samples = None
+                self.draft_segment = None
+                self.manual_next_start = segment.end
+                self.playhead_time = segment.cue
+                self.refresh_sources()
+                self._load_current_audio()
             self._fill_detail(segment)
             self.selection = (segment.start, segment.end)
             self.draw_audio()
