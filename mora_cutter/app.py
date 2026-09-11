@@ -1943,15 +1943,44 @@ class MoraCutterApp(AppBase):
         for segment in self.project.segments:
             key = kana_to_romaji.get(segment.label, segment.label.lower())
             counts[key] = counts.get(key, 0) + 1
-        ttk.Label(window, text="ローマ字を優先表示（緑: 収集用リスト　青: 候補あり　灰: 未収集）", padding=10).pack(anchor="w")
-        grid = ttk.Frame(window, padding=10)
-        grid.pack(fill="both", expand=True)
+        ttk.Label(window, text="ローマ字を優先表示（緑: リスト内・収集済み　黄: リスト内・未収集　青: 候補あり　灰: 未収集）", padding=10).pack(anchor="w")
+        body = ttk.Frame(window)
+        body.pack(fill="both", expand=True)
+        canvas = tk.Canvas(body, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(body, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        grid = ttk.Frame(canvas, padding=10)
+        grid_window = canvas.create_window((0, 0), window=grid, anchor="nw")
+        grid.bind("<Configure>", lambda _: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda event: canvas.itemconfigure(grid_window, width=event.width))
+
+        def scroll(event: tk.Event) -> str:
+            delta = getattr(event, "delta", 0)
+            if delta:
+                canvas.yview_scroll(-max(1, abs(delta) // 120) if delta > 0 else max(1, abs(delta) // 120), "units")
+            elif getattr(event, "num", 0) == 4:
+                canvas.yview_scroll(-3, "units")
+            elif getattr(event, "num", 0) == 5:
+                canvas.yview_scroll(3, "units")
+            return "break"
+
+        canvas.bind("<MouseWheel>", scroll)
+        canvas.bind("<Button-4>", scroll)
+        canvas.bind("<Button-5>", scroll)
         for row, (kana_row, roman_row) in enumerate(rows):
             for col, (kana, roman) in enumerate(zip(kana_row, roman_row)):
                 count = counts.get(roman, 0)
-                color = "#2e9c67" if roman in requested else "#367ca5" if count else "#59616a"
-                button = tk.Button(grid, text=f"{roman}\n{kana}  {count}", width=7, height=2, bg=color, fg="white", relief="flat", command=lambda labels={kana, roman}: self._filter_label(labels, window))
+                if roman in requested:
+                    color, foreground = ("#2e9c67", "white") if count else ("#f2c94c", "#1d242b")
+                else:
+                    color, foreground = ("#367ca5", "white") if count else ("#59616a", "white")
+                button = tk.Button(grid, text=f"{roman}\n{kana}  {count}", width=7, height=2, bg=color, fg=foreground, relief="flat", command=lambda labels={kana, roman}: self._filter_label(labels, window))
                 button.grid(row=row, column=col, padx=3, pady=3)
+                button.bind("<MouseWheel>", scroll)
+                button.bind("<Button-4>", scroll)
+                button.bind("<Button-5>", scroll)
         breaths = sum(s.breath for s in self.project.segments)
         sighs = sum(getattr(s, "sigh", False) for s in self.project.segments)
         ttk.Label(window, text=f"ブレス: {breaths}　息: {sighs}　全候補: {len(self.project.segments)}", padding=10).pack(anchor="w")
