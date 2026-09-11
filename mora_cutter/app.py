@@ -358,6 +358,7 @@ class MoraCutterApp(AppBase):
         self.wave_canvas.bind("<ButtonPress-1>", self._canvas_press)
         self.wave_canvas.bind("<B1-Motion>", self._canvas_drag)
         self.wave_canvas.bind("<ButtonRelease-1>", self._canvas_release)
+        self.wave_canvas.bind("<Double-Button-1>", self._canvas_double_click)
         self.wave_canvas.bind("<ButtonPress-3>", self._range_press)
         self.wave_canvas.bind("<B3-Motion>", self._range_drag)
         self.wave_canvas.bind("<ButtonRelease-3>", self._range_release)
@@ -1081,7 +1082,28 @@ class MoraCutterApp(AppBase):
         self._draw_overlays()
         start, end = sorted(self.selection)
         if end - start >= 0.005:
-            self.status_var.set(f"切り出し範囲: {start:.3f}–{end:.3f}秒。Fキーまたは「フリックパッドを表示」で発音を入力します")
+            # A manually created range has no cue yet; its start is the cue
+            # that will be used when a pronunciation is registered.
+            self.playhead_time = start
+            self._draw_overlays()
+            self.status_var.set(
+                f"切り出し範囲: {start:.3f}–{end:.3f}秒（再生位置/cue: {start:.3f}秒）。"
+                "Fキーまたは「フリックパッドを表示」で発音を入力します"
+            )
+
+    def _canvas_double_click(self, _event: tk.Event) -> str:
+        """Dismiss a pending range, or only the selected saved candidate."""
+        selected = self.draft_segment or self.current_segment()
+        if selected is None:
+            self.selection = (0.0, 0.0)
+            self.status_var.set("未確定の切り出し範囲を解除しました")
+        else:
+            self.current_segment_id = None
+            self.draft_segment = None
+            self.segment_tree.selection_remove(self.segment_tree.selection())
+            self.status_var.set("候補の選択を解除しました（切り出し範囲は残しています）")
+        self._draw_overlays()
+        return "break"
 
     def _seek_playhead(self, value: float) -> None:
         source = self.current_source()
