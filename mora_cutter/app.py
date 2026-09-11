@@ -1930,12 +1930,12 @@ class MoraCutterApp(AppBase):
             ("ぱぴぷぺぽ", ("pa", "pi", "pu", "pe", "po")),
             # 拗音（ゃ・ゅ・ょ）。収集用リストのローマ字／かな両方を
             # 同じ候補として扱えるよう、標準的なローマ字を持たせる。
-            ("きゃきゅきょ", ("kya", "kyu", "kyo")), ("ぎゃぎゅぎょ", ("gya", "gyu", "gyo")),
-            ("しゃしゅしょ", ("sha", "shu", "sho")), ("じゃじゅじょ", ("ja", "ju", "jo")),
-            ("ちゃちゅちょ", ("cha", "chu", "cho")), ("にゃにゅにょ", ("nya", "nyu", "nyo")),
-            ("ひゃひゅひょ", ("hya", "hyu", "hyo")), ("びゃびゅびょ", ("bya", "byu", "byo")),
-            ("ぴゃぴゅぴょ", ("pya", "pyu", "pyo")), ("みゃみゅみょ", ("mya", "myu", "myo")),
-            ("りゃりゅりょ", ("rya", "ryu", "ryo")),
+            (("きゃ", "きゅ", "きょ"), ("kya", "kyu", "kyo")), (("ぎゃ", "ぎゅ", "ぎょ"), ("gya", "gyu", "gyo")),
+            (("しゃ", "しゅ", "しょ"), ("sha", "shu", "sho")), (("じゃ", "じゅ", "じょ"), ("ja", "ju", "jo")),
+            (("ちゃ", "ちゅ", "ちょ"), ("cha", "chu", "cho")), (("にゃ", "にゅ", "にょ"), ("nya", "nyu", "nyo")),
+            (("ひゃ", "ひゅ", "ひょ"), ("hya", "hyu", "hyo")), (("びゃ", "びゅ", "びょ"), ("bya", "byu", "byo")),
+            (("ぴゃ", "ぴゅ", "ぴょ"), ("pya", "pyu", "pyo")), (("みゃ", "みゅ", "みょ"), ("mya", "myu", "myo")),
+            (("りゃ", "りゅ", "りょ"), ("rya", "ryu", "ryo")),
         )
         kana_to_romaji = {kana: roman for kana_row, roman_row in rows for kana, roman in zip(kana_row, roman_row)}
         requested = {
