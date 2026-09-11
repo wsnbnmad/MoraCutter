@@ -453,6 +453,7 @@ class MoraCutterApp(AppBase):
 
     def _bind_keys(self) -> None:
         self.bind_all("<Button-1>", self._release_text_focus_on_outer_click, add="+")
+        self.bind_all("<Button-3>", self._release_text_focus_on_outer_click, add="+")
         self.bind_all("<Control-n>", lambda _: self.new_project())
         self.bind_all("<Control-o>", lambda _: self.open_project())
         self.bind_all("<Control-s>", lambda _: self.save())
@@ -487,6 +488,7 @@ class MoraCutterApp(AppBase):
     def _toggle_playback(self, _event: object = None) -> str | None:
         if self._text_input_active():
             return None
+        self.wave_canvas.focus_set()
         if self.player and self.player.poll() is None:
             self.stop_audio()
         else:
@@ -976,6 +978,7 @@ class MoraCutterApp(AppBase):
         self.draw_audio()
 
     def _canvas_press(self, event: tk.Event) -> None:
+        self.wave_canvas.focus_set()
         self.canvas_press_x = float(event.x)
         self.canvas_dragged = False
         time = self._x_to_time(event.x)
@@ -1417,6 +1420,7 @@ class MoraCutterApp(AppBase):
         source = self.current_source()
         if segment is not None:
             self._apply_detail(show_error=True, status="候補を更新しました")
+            self.wave_canvas.focus_set()
             return "break"
         if source is None:
             return "break"
@@ -1433,6 +1437,7 @@ class MoraCutterApp(AppBase):
         self.selection = (start, end)
         self.manual_next_start = end
         self._after_project_change(f"「{label}」を候補に追加しました")
+        self.wave_canvas.focus_set()
         return "break"
 
     def apply_voice_type(self, kind: str) -> None:
@@ -1481,6 +1486,7 @@ class MoraCutterApp(AppBase):
         self._after_project_change("候補を削除しました")
 
     def play_cue(self, loop: bool = False) -> None:
+        self.wave_canvas.focus_set()
         self._finish_pointer_interaction()
         segment = self.current_segment()
         source = self.current_source()
