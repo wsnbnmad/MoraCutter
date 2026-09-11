@@ -421,8 +421,9 @@ class MoraCutterApp(AppBase):
         self.breath_var = tk.BooleanVar()
         self.sigh_var = tk.BooleanVar()
         self.detail_entries["label"].bind("<Return>", self._detail_label_enter)
-        self.detail_entries["label"].bind("<KeyPress-c>", self._play_cue_key)
-        self.detail_entries["label"].bind("<KeyPress-C>", self._play_cue_key)
+        self.detail_entries["label"].bind("<KeyPress>", self._detail_label_keypress)
+        validate_label = self.register(self._validate_label_input)
+        self.detail_entries["label"].configure(validate="key", validatecommand=(validate_label, "%S"))
         ttk.Checkbutton(detail, text="ブレス", variable=self.breath_var, command=lambda: self.apply_voice_type("breath")).grid(row=6, column=0, columnspan=2, sticky="w")
         ttk.Checkbutton(detail, text="息", variable=self.sigh_var, command=lambda: self.apply_voice_type("sigh")).grid(row=7, column=0, columnspan=2, sticky="w")
         ttk.Button(detail, text="候補を削除", command=self.delete_segment).grid(row=8, column=0, columnspan=2, sticky="ew", pady=(8, 3))
@@ -507,6 +508,19 @@ class MoraCutterApp(AppBase):
             return "break"
         self.play_cue()
         return "break"
+
+    def _detail_label_keypress(self, event: tk.Event) -> str | None:
+        """Catch physical C even while Windows IME is composing full-width text."""
+        if event.keycode == 67 or event.keysym.lower() == "c":
+            return self._play_cue_key(event)
+        return None
+
+    def _validate_label_input(self, inserted: str) -> bool:
+        """Block a committed c/ｃ as a final fallback for IME input methods."""
+        if inserted in {"c", "C", "ｃ", "Ｃ"}:
+            self.after_idle(self.play_cue)
+            return False
+        return True
 
     def _commit_key(self, _event: object = None) -> str | None:
         if self._text_input_active():
