@@ -1928,6 +1928,14 @@ class MoraCutterApp(AppBase):
             ("がぎぐげご", ("ga", "gi", "gu", "ge", "go")), ("ざじずぜぞ", ("za", "ji", "zu", "ze", "zo")),
             ("だぢづでど", ("da", "ji", "zu", "de", "do")), ("ばびぶべぼ", ("ba", "bi", "bu", "be", "bo")),
             ("ぱぴぷぺぽ", ("pa", "pi", "pu", "pe", "po")),
+            # 拗音（ゃ・ゅ・ょ）。収集用リストのローマ字／かな両方を
+            # 同じ候補として扱えるよう、標準的なローマ字を持たせる。
+            ("きゃきゅきょ", ("kya", "kyu", "kyo")), ("ぎゃぎゅぎょ", ("gya", "gyu", "gyo")),
+            ("しゃしゅしょ", ("sha", "shu", "sho")), ("じゃじゅじょ", ("ja", "ju", "jo")),
+            ("ちゃちゅちょ", ("cha", "chu", "cho")), ("にゃにゅにょ", ("nya", "nyu", "nyo")),
+            ("ひゃひゅひょ", ("hya", "hyu", "hyo")), ("びゃびゅびょ", ("bya", "byu", "byo")),
+            ("ぴゃぴゅぴょ", ("pya", "pyu", "pyo")), ("みゃみゅみょ", ("mya", "myu", "myo")),
+            ("りゃりゅりょ", ("rya", "ryu", "ryo")),
         )
         kana_to_romaji = {kana: roman for kana_row, roman_row in rows for kana, roman in zip(kana_row, roman_row)}
         requested = {
