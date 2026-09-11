@@ -248,6 +248,7 @@ class MoraCutterApp(AppBase):
         self.history = History(100)
         self.export_checked_ids: set[str] = set()
         self._known_segment_ids: set[str] = set()
+        self._refreshing_segment_tree = False
         self.player: subprocess.Popen[bytes] | None = None
         self.playhead_time = 0.0
         self._playback_started_at = 0.0
@@ -1455,41 +1456,51 @@ class MoraCutterApp(AppBase):
         self.export_checked_ids.update(all_ids - self._known_segment_ids)
         self._known_segment_ids = all_ids
         previously_selected = set(self.segment_tree.selection())
-        self.segment_tree.delete(*self.segment_tree.get_children())
-        query = self.search_var.get().lower().strip()
-        source_names = {source.id: Path(source.path).name for source in self.project.sources}
-        # First reduce the project-wide list to the search result, then sort
-        # that result. Keeping these stages separate prevents a header click
-        # from rebuilding an unfiltered list.
-        segments: list[Segment] = []
-        for segment in self.project.segments:
-            source_name = source_names.get(segment.source_id, "（素材なし）")
-            haystack = f"{segment.label} {_canonical_pronunciation(segment.label)} {source_name} {segment.pitch}".lower()
-            if self._coverage_filter_labels is not None and segment.label not in self._coverage_filter_labels:
-                continue
-            if query and query not in haystack:
-                continue
-            segments.append(segment)
-        key_functions = {
-            "label": lambda item: (item.label.lower(), item.start, item.order),
-            "source": lambda item: (source_names.get(item.source_id, ""), item.start, item.order),
-            "pitch": lambda item: (item.pitch.lower(), item.start, item.order),
-            "start": lambda item: (item.start, item.order),
-        }
-        segments = sorted(segments, key=key_functions[self.list_sort_key], reverse=self.list_sort_reverse)
-        duplicate_numbers: dict[str, int] = {}
-        for segment in segments:
-            duplicate_numbers[segment.label] = duplicate_numbers.get(segment.label, 0) + 1
-            source_name = source_names.get(segment.source_id, "（素材なし）")
-            occurrence = duplicate_numbers[segment.label]
-            display_label = segment.label if occurrence == 1 else f"{segment.label} ({occurrence})"
-            mark = "☑" if segment.id in self.export_checked_ids else "☐"
-            self.segment_tree.insert("", "end", iid=segment.id, values=(mark, display_label, source_name, segment.pitch, f"{segment.start:.3f}", f"{segment.end:.3f}"))
-        restored = [segment_id for segment_id in previously_selected if self.segment_tree.exists(segment_id)]
-        if restored:
-            self.segment_tree.selection_set(restored)
-        elif self.current_segment_id and self.segment_tree.exists(self.current_segment_id):
-            self.segment_tree.selection_set(self.current_segment_id)
+        self._refreshing_segment_tree = True
+        try:
+            self.segment_tree.delete(*self.segment_tree.get_children())
+            query = self.search_var.get().lower().strip()
+            source_names = {source.id: Path(source.path).name for source in self.project.sources}
+            # First reduce the project-wide list to the search result, then sort
+            # that result. Keeping these stages separate prevents a header click
+            # from rebuilding an unfiltered list.
+            segments: list[Segment] = []
+            for segment in self.project.segments:
+                source_name = source_names.get(segment.source_id, "（素材なし）")
+                haystack = f"{segment.label} {_canonical_pronunciation(segment.label)} {source_name} {segment.pitch}".lower()
+                if self._coverage_filter_labels is not None and segment.label not in self._coverage_filter_labels:
+                    continue
+                if query and query not in haystack:
+                    continue
+                segments.append(segment)
+            key_functions = {
+                "label": lambda item: (item.label.lower(), item.start, item.order),
+                "source": lambda item: (source_names.get(item.source_id, ""), item.start, item.order),
+                "pitch": lambda item: (item.pitch.lower(), item.start, item.order),
+                "start": lambda item: (item.start, item.order),
+            }
+            segments = sorted(segments, key=key_functions[self.list_sort_key], reverse=self.list_sort_reverse)
+            duplicate_numbers: dict[str, int] = {}
+            for segment in segments:
+                duplicate_numbers[segment.label] = duplicate_numbers.get(segment.label, 0) + 1
+                source_name = source_names.get(segment.source_id, "（素材なし）")
+                occurrence = duplicate_numbers[segment.label]
+                display_label = segment.label if occurrence == 1 else f"{segment.label} ({occurrence})"
+                mark = "☑" if segment.id in self.export_checked_ids else "☐"
+                self.segment_tree.insert("", "end", iid=segment.id, values=(mark, display_label, source_name, segment.pitch, f"{segment.start:.3f}", f"{segment.end:.3f}"))
+            restored = [segment_id for segment_id in previously_selected if self.segment_tree.exists(segment_id)]
+            if restored:
+                self.segment_tree.selection_set(restored)
+            elif self.current_segment_id and self.segment_tree.exists(self.current_segment_id):
+                self.segment_tree.selection_set(self.current_segment_id)
+        finally:
+            # Treeview emits <<TreeviewSelect>> after this callback returns on
+            # some Tk builds. Keep the guard through the current idle cycle so
+            # rebuilding/searching cannot trigger a source reload.
+            self.after_idle(self._finish_segment_tree_refresh)
+
+    def _finish_segment_tree_refresh(self) -> None:
+        self._refreshing_segment_tree = False
 
     def _set_visible_export_checks(self, checked: bool) -> None:
         ids = set(self.segment_tree.get_children())
@@ -1539,6 +1550,8 @@ class MoraCutterApp(AppBase):
         self.refresh_segments()
 
     def _segment_selected(self, _: object = None) -> None:
+        if self._refreshing_segment_tree:
+            return
         ids = self.segment_tree.selection()
         if not ids:
             return
