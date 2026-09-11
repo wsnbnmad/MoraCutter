@@ -1457,8 +1457,19 @@ class MoraCutterApp(AppBase):
         previously_selected = set(self.segment_tree.selection())
         self.segment_tree.delete(*self.segment_tree.get_children())
         query = self.search_var.get().lower().strip()
-        segments = list(self.project.segments)
         source_names = {source.id: Path(source.path).name for source in self.project.sources}
+        # First reduce the project-wide list to the search result, then sort
+        # that result. Keeping these stages separate prevents a header click
+        # from rebuilding an unfiltered list.
+        segments: list[Segment] = []
+        for segment in self.project.segments:
+            source_name = source_names.get(segment.source_id, "（素材なし）")
+            haystack = f"{segment.label} {_canonical_pronunciation(segment.label)} {source_name} {segment.pitch}".lower()
+            if self._coverage_filter_labels is not None and segment.label not in self._coverage_filter_labels:
+                continue
+            if query and query not in haystack:
+                continue
+            segments.append(segment)
         key_functions = {
             "label": lambda item: (item.label.lower(), item.start, item.order),
             "source": lambda item: (source_names.get(item.source_id, ""), item.start, item.order),
@@ -1470,11 +1481,6 @@ class MoraCutterApp(AppBase):
         for segment in segments:
             duplicate_numbers[segment.label] = duplicate_numbers.get(segment.label, 0) + 1
             source_name = source_names.get(segment.source_id, "（素材なし）")
-            haystack = f"{segment.label} {source_name} {segment.pitch}".lower()
-            if self._coverage_filter_labels is not None and segment.label not in self._coverage_filter_labels:
-                continue
-            if query and query not in haystack:
-                continue
             occurrence = duplicate_numbers[segment.label]
             display_label = segment.label if occurrence == 1 else f"{segment.label} ({occurrence})"
             mark = "☑" if segment.id in self.export_checked_ids else "☐"
