@@ -246,6 +246,8 @@ class MoraCutterApp(AppBase):
         self._pointer_resume_end = 0.0
         self._pointer_resume_loop = False
         self.history = History(100)
+        self.export_checked_ids: set[str] = set()
+        self._known_segment_ids: set[str] = set()
         self.player: subprocess.Popen[bytes] | None = None
         self.playhead_time = 0.0
         self._playback_started_at = 0.0
@@ -456,6 +458,10 @@ class MoraCutterApp(AppBase):
         search_row = ttk.Frame(candidates)
         search_row.pack(fill="x", pady=(2, 4))
         ttk.Label(search_row, text="リスト", font=("TkDefaultFont", 11, "bold")).pack(side="left")
+        ttk.Button(search_row, text="全選択", command=lambda: self._set_visible_export_checks(True)).pack(side="left", padx=(10, 2))
+        ttk.Button(search_row, text="全選択解除", command=lambda: self._set_visible_export_checks(False)).pack(side="left", padx=2)
+        ttk.Button(search_row, text="選択をチェック", command=lambda: self._set_selected_export_checks(True)).pack(side="left", padx=(8, 2))
+        ttk.Button(search_row, text="選択を解除", command=lambda: self._set_selected_export_checks(False)).pack(side="left", padx=2)
         self.search_var = tk.StringVar()
         search = ttk.Entry(search_row, textvariable=self.search_var, width=22)
         search.pack(side="right")
@@ -463,10 +469,10 @@ class MoraCutterApp(AppBase):
         ttk.Button(search_row, text="全表示", command=self._clear_coverage_filter).pack(side="right", padx=(0, 5))
         self.search_var.trace_add("write", self._search_changed)
 
-        columns = ("label", "pitch", "start", "end")
-        self.segment_tree = ttk.Treeview(candidates, columns=columns, show="headings", selectmode="browse")
-        headings = {"label":"発音", "pitch":"音程", "start":"開始", "end":"終了"}
-        widths = {"label":120, "pitch":70, "start":95, "end":95}
+        columns = ("export", "label", "pitch", "start", "end")
+        self.segment_tree = ttk.Treeview(candidates, columns=columns, show="headings", selectmode="extended")
+        headings = {"export":"書出", "label":"発音", "pitch":"音程", "start":"開始", "end":"終了"}
+        widths = {"export":46, "label":120, "pitch":70, "start":95, "end":95}
         for key in columns:
             command = (lambda column=key: self._sort_list(column)) if key in {"label", "pitch", "start"} else None
             if command is None:
@@ -476,6 +482,7 @@ class MoraCutterApp(AppBase):
             self.segment_tree.column(key, width=widths[key], anchor="center", stretch=key == "label")
         self.segment_tree.pack(fill="both", expand=True)
         self.segment_tree.bind("<<TreeviewSelect>>", self._segment_selected)
+        self.segment_tree.bind("<Button-1>", self._tree_checkbox_click, add="+")
         self.segment_tree.bind("<Double-1>", lambda _: self.play_cue())
 
         detail = ttk.LabelFrame(lower, text="候補の詳細", padding=9)
@@ -1440,6 +1447,13 @@ class MoraCutterApp(AppBase):
         segment.quality_score = 0.45*clarity + 0.30*noise + 0.25*stability
 
     def refresh_segments(self) -> None:
+        all_ids = {segment.id for segment in self.project.segments}
+        # New candidates are selected for export by default. Existing manual
+        # check choices survive sorting, filtering and source changes.
+        self.export_checked_ids.intersection_update(all_ids)
+        self.export_checked_ids.update(all_ids - self._known_segment_ids)
+        self._known_segment_ids = all_ids
+        previously_selected = set(self.segment_tree.selection())
         self.segment_tree.delete(*self.segment_tree.get_children())
         query = self.search_var.get().lower().strip()
         segments = [s for s in self.project.segments if s.source_id == self.current_source_id]
@@ -1459,9 +1473,48 @@ class MoraCutterApp(AppBase):
                 continue
             occurrence = duplicate_numbers[segment.label]
             display_label = segment.label if occurrence == 1 else f"{segment.label} ({occurrence})"
-            self.segment_tree.insert("", "end", iid=segment.id, values=(display_label, segment.pitch, f"{segment.start:.3f}", f"{segment.end:.3f}"))
-        if self.current_segment_id and self.segment_tree.exists(self.current_segment_id):
+            mark = "☑" if segment.id in self.export_checked_ids else "☐"
+            self.segment_tree.insert("", "end", iid=segment.id, values=(mark, display_label, segment.pitch, f"{segment.start:.3f}", f"{segment.end:.3f}"))
+        restored = [segment_id for segment_id in previously_selected if self.segment_tree.exists(segment_id)]
+        if restored:
+            self.segment_tree.selection_set(restored)
+        elif self.current_segment_id and self.segment_tree.exists(self.current_segment_id):
             self.segment_tree.selection_set(self.current_segment_id)
+
+    def _set_visible_export_checks(self, checked: bool) -> None:
+        ids = set(self.segment_tree.get_children())
+        if checked:
+            self.export_checked_ids.update(ids)
+        else:
+            self.export_checked_ids.difference_update(ids)
+        self.refresh_segments()
+
+    def _set_selected_export_checks(self, checked: bool) -> None:
+        ids = set(self.segment_tree.selection())
+        if not ids:
+            self.status_var.set("先にリストの候補を選択してください（Shiftで範囲選択できます）")
+            return
+        if checked:
+            self.export_checked_ids.update(ids)
+        else:
+            self.export_checked_ids.difference_update(ids)
+        self.refresh_segments()
+
+    def _tree_checkbox_click(self, event: tk.Event) -> str | None:
+        """Toggle one checkbox, or every currently selected row as a batch."""
+        if self.segment_tree.identify_region(event.x, event.y) != "cell" or self.segment_tree.identify_column(event.x) != "#1":
+            return None
+        row = self.segment_tree.identify_row(event.y)
+        if not row:
+            return "break"
+        selected = set(self.segment_tree.selection())
+        targets = selected if row in selected and len(selected) > 1 else {row}
+        if row in self.export_checked_ids:
+            self.export_checked_ids.difference_update(targets)
+        else:
+            self.export_checked_ids.update(targets)
+        self.refresh_segments()
+        return "break"
 
     def _search_changed(self, *_: object) -> None:
         self._coverage_filter_labels = None
@@ -1915,10 +1968,12 @@ class MoraCutterApp(AppBase):
     '''
 
     def export_all(self) -> None:
-        labelled = [s for s in self.project.segments if s.label and s.label != "未分類"]
-        segments = labelled
+        segments = [
+            segment for segment in self.project.segments
+            if segment.id in self.export_checked_ids and segment.label and segment.label != "未分類"
+        ]
         if not segments:
-            messagebox.showinfo("候補がありません", "書き出す候補を作成してください。")
+            messagebox.showinfo("書き出し対象がありません", "リストで書き出す候補にチェックを付けてください。")
             return
         folder = filedialog.askdirectory(title="WAVの書き出し先")
         if not folder:
@@ -2102,6 +2157,8 @@ class MoraCutterApp(AppBase):
         self.current_segment_id = None
         self.current_samples = None
         self.history = History(100)
+        self.export_checked_ids.clear()
+        self._known_segment_ids.clear()
         self._dirty = False
         self.refresh_sources()
         self.refresh_segments()
@@ -2122,6 +2179,8 @@ class MoraCutterApp(AppBase):
             self.current_segment_id = None
             self.current_samples = None
             self.history = History(100)
+            self.export_checked_ids.clear()
+            self._known_segment_ids.clear()
             self._dirty = False
             self.refresh_sources()
             self._load_current_audio()
