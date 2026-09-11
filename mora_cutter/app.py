@@ -960,9 +960,17 @@ class MoraCutterApp(AppBase):
         if segment:
             view_start, view_end = self._visible_range()
             tolerance = (view_end-view_start) * 10 / max(self.wave_canvas.winfo_width(), 1)
-            distances = {"start": abs(time-segment.start), "cue": abs(time-segment.cue), "end": abs(time-segment.end)}
-            marker = min(distances, key=distances.get)
-            if distances[marker] <= tolerance:
+            # Start/end handles deliberately face outward: a click just left
+            # of start edits start, and a click just right of end edits end.
+            # That leaves the audio region itself available for scrubbing.
+            marker = None
+            if segment.start - tolerance <= time <= segment.start:
+                marker = "start"
+            elif segment.end <= time <= segment.end + tolerance:
+                marker = "end"
+            elif abs(time-segment.cue) <= tolerance:
+                marker = "cue"
+            if marker:
                 self._record()
                 self.drag_mode = marker
                 self.wave_canvas.config(cursor="sb_h_double_arrow")
@@ -971,8 +979,8 @@ class MoraCutterApp(AppBase):
         if b - a >= 0.005:
             view_start, view_end = self._visible_range()
             tolerance = (view_end-view_start) * 10 / max(self.wave_canvas.winfo_width(), 1)
-            if abs(point-a) <= tolerance or abs(point-b) <= tolerance:
-                self.drag_mode = "selection_start" if abs(point-a) <= abs(point-b) else "selection_end"
+            if abs(time-a) <= tolerance or abs(time-b) <= tolerance:
+                self.drag_mode = "selection_start" if abs(time-a) <= abs(time-b) else "selection_end"
                 self.wave_canvas.config(cursor="sb_h_double_arrow")
                 return
         self.drag_mode = "playhead"
