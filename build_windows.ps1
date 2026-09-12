@@ -1,56 +1,101 @@
 [CmdletBinding()]
 param(
     [string]$Python = "python",
+    [ValidateSet("x64", "ARM64")]
+    [string]$Architecture = "x64",
     [string]$OutputRoot = "",
-    [string]$CertificateThumbprint = "",
-    [string]$TimestampUrl = "http://timestamp.digicert.com"
+    [string]$FFmpegBin = "",
+    [string]$CertificateThumbprint = ""
 )
 
 $ErrorActionPreference = "Stop"
-$projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-if (-not $OutputRoot) {
-    $OutputRoot = Join-Path $projectRoot "release"
+$projectRoot = (Resolve-Path -LiteralPath (Split-Path -Parent $MyInvocation.MyCommand.Path)).Path
+if (-not $OutputRoot) { $OutputRoot = Join-Path $projectRoot "release" }
+$outputFull = [System.IO.Path]::GetFullPath($OutputRoot)
+if (-not $outputFull.StartsWith($projectRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "OutputRoot must be inside the project directory: $projectRoot"
 }
-$distRoot = Join-Path $OutputRoot "dist"
-$workRoot = Join-Path $OutputRoot "build"
+
+$machine = (& $Python -c "import platform; print(platform.machine())").Trim().ToUpperInvariant()
+if ($Architecture -eq "ARM64" -and $machine -notin @("ARM64", "AARCH64")) {
+    throw "A native ARM64 Python on Windows ARM64 is required for the ARM64 package. Detected: $machine"
+}
+if ($Architecture -eq "x64" -and $machine -notin @("AMD64", "X86_64")) {
+    throw "A native x64 Python is required for the x64 package. Detected: $machine"
+}
+
+if (-not $FFmpegBin) {
+    $ffmpegCommand = Get-Command ffmpeg.exe -ErrorAction SilentlyContinue
+    if ($ffmpegCommand) { $FFmpegBin = Split-Path -Parent $ffmpegCommand.Source }
+}
+if (-not $FFmpegBin) { throw "Supply -FFmpegBin with ffmpeg.exe, ffprobe.exe and ffplay.exe." }
+$FFmpegBin = (Resolve-Path -LiteralPath $FFmpegBin).Path
+foreach ($name in @("ffmpeg.exe", "ffprobe.exe", "ffplay.exe")) {
+    if (-not (Test-Path -LiteralPath (Join-Path $FFmpegBin $name))) { throw "$name was not found in $FFmpegBin" }
+}
+$ffmpegManifest = Get-Content -LiteralPath (Join-Path $projectRoot "ffmpeg-manifest.json") -Raw | ConvertFrom-Json
+foreach ($name in @("ffmpeg.exe", "ffprobe.exe", "ffplay.exe")) {
+    $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $FFmpegBin $name)).Hash
+    $expectedHash = $ffmpegManifest.files.$name
+    if ($actualHash -ne $expectedHash) { throw "$name SHA-256 mismatch. Expected $expectedHash, got $actualHash" }
+}
+
+$version = (& $Python -c "from mora_cutter import __version__; print(__version__)").Trim()
+$packageName = "MoraCutter-v$version-Windows-$Architecture"
+$stageRoot = Join-Path $outputFull "stage-$Architecture"
+$distRoot = Join-Path $stageRoot "dist"
+$workRoot = Join-Path $stageRoot "build"
 $portableRoot = Join-Path $distRoot "MoraCutter"
+$finalFolder = Join-Path $outputFull $packageName
+$zipPath = Join-Path $outputFull "$packageName.zip"
+foreach ($target in @($stageRoot, $finalFolder, $zipPath)) {
+    if (Test-Path -LiteralPath $target) { throw "Output already exists; move or delete it before rebuilding: $target" }
+}
 
-& $Python -m pip install --disable-pip-version-check --upgrade `
-    -r (Join-Path $projectRoot "requirements.txt") `
-    -r (Join-Path $projectRoot "requirements-whisper.txt") `
-    "pyinstaller>=6.0"
+& $Python -m pip install --disable-pip-version-check -r (Join-Path $projectRoot "requirements-build.txt")
 if ($LASTEXITCODE -ne 0) { throw "Python dependencies could not be installed." }
-
-& $Python -m PyInstaller `
-    --noconfirm `
-    --clean `
-    --distpath $distRoot `
-    --workpath $workRoot `
-    (Join-Path $projectRoot "MoraCutter.spec")
+& $Python -m unittest discover -s (Join-Path $projectRoot "tests") -v
+if ($LASTEXITCODE -ne 0) { throw "Tests failed." }
+& $Python -m PyInstaller --noconfirm --clean --distpath $distRoot --workpath $workRoot (Join-Path $projectRoot "MoraCutter.spec")
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed." }
 
-$binRoot = Join-Path $portableRoot "bin"
-New-Item -ItemType Directory -Force -Path $binRoot | Out-Null
-foreach ($toolName in @("ffmpeg.exe", "ffprobe.exe", "ffplay.exe")) {
-    $tool = Get-Command $toolName -ErrorAction Stop
-    Copy-Item -LiteralPath $tool.Source -Destination (Join-Path $binRoot $toolName) -Force
+Move-Item -LiteralPath $portableRoot -Destination $finalFolder
+$toolTarget = Join-Path $finalFolder "tools\ffmpeg\bin"
+New-Item -ItemType Directory -Force -Path $toolTarget | Out-Null
+foreach ($name in @("ffmpeg.exe", "ffprobe.exe", "ffplay.exe")) {
+    Copy-Item -LiteralPath (Join-Path $FFmpegBin $name) -Destination (Join-Path $toolTarget $name)
 }
-Copy-Item -LiteralPath (Join-Path $projectRoot "README.md") -Destination $portableRoot -Force
-New-Item -ItemType Directory -Force -Path (Join-Path $portableRoot "models") | Out-Null
+Copy-Item -LiteralPath (Join-Path $projectRoot "お読みください.txt") -Destination $finalFolder
+Copy-Item -LiteralPath (Join-Path $projectRoot "LICENSE.txt") -Destination $finalFolder
+Copy-Item -LiteralPath (Join-Path $projectRoot "THIRD_PARTY_NOTICES.md") -Destination $finalFolder
+Copy-Item -LiteralPath (Join-Path $projectRoot "resources") -Destination $finalFolder -Recurse
+$thirdParty = Join-Path $finalFolder "THIRD_PARTY_LICENSES"
+Copy-Item -LiteralPath (Join-Path $projectRoot "THIRD_PARTY_LICENSES") -Destination $finalFolder -Recurse
+& $Python (Join-Path $projectRoot "build_support\collect_licenses.py") $thirdParty (Join-Path $FFmpegBin "ffmpeg.exe")
+if ($LASTEXITCODE -ne 0) { throw "Third-party license collection failed." }
+$readmePath = Join-Path $finalFolder "お読みください.txt"
+$readmeText = Get-Content -LiteralPath $readmePath -Raw
+[System.IO.File]::WriteAllText($readmePath, $readmeText, [System.Text.UTF8Encoding]::new($true))
 
-$application = Join-Path $portableRoot "MoraCutter.exe"
+$application = Join-Path $finalFolder "MoraCutter.exe"
 if ($CertificateThumbprint) {
-    & (Join-Path $projectRoot "sign_windows.ps1") `
-        -Executable $application `
-        -CertificateThumbprint $CertificateThumbprint `
-        -TimestampUrl $TimestampUrl
+    & (Join-Path $projectRoot "sign_windows.ps1") -Executable $application -CertificateThumbprint $CertificateThumbprint -AllowSelfSigned
     if ($LASTEXITCODE -ne 0) { throw "Code signing failed." }
+    $certificate = Get-ChildItem "Cert:\CurrentUser\My\$CertificateThumbprint" -ErrorAction Stop
+    Export-Certificate -Cert $certificate -FilePath (Join-Path $finalFolder "MoraCutter-public.cer") -Force | Out-Null
 } else {
-    Write-Warning "The executable is unsigned. Supply -CertificateThumbprint after obtaining a trusted code-signing certificate."
+    Write-Warning "The EXE is unsigned. Use create_self_signed_certificate.ps1, then pass -CertificateThumbprint."
 }
 
-$hash = Get-FileHash -Algorithm SHA256 -LiteralPath $application
-$hashLine = "$($hash.Hash)  MoraCutter.exe"
-Set-Content -LiteralPath (Join-Path $portableRoot "SHA256SUMS.txt") -Value $hashLine -Encoding ascii
-Write-Output "Build completed: $portableRoot"
-Write-Output $hashLine
+$hashLines = Get-ChildItem -LiteralPath $finalFolder -File -Recurse | Sort-Object FullName | ForEach-Object {
+    $relative = $_.FullName.Substring($finalFolder.Length + 1).Replace('\', '/')
+    "$((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash)  $relative"
+}
+Set-Content -LiteralPath (Join-Path $finalFolder "SHA256SUMS.txt") -Value $hashLines -Encoding ascii
+Compress-Archive -LiteralPath $finalFolder -DestinationPath $zipPath -CompressionLevel Optimal
+$zipSize = (Get-Item -LiteralPath $zipPath).Length
+if ($zipSize -gt 500MB) { throw "Package exceeds 500 MB: $([math]::Round($zipSize / 1MB, 1)) MB" }
+$zipHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipPath).Hash
+Set-Content -LiteralPath (Join-Path $outputFull "$packageName.sha256.txt") -Value "$zipHash  $packageName.zip" -Encoding ascii
+Write-Output "Package: $zipPath"
+Write-Output "SHA-256: $zipHash"

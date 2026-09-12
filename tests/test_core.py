@@ -134,12 +134,29 @@ class DomainTests(unittest.TestCase):
         self.assertEqual(loaded.segments[0].label, "さ")
         self.assertEqual(loaded.segments[0].gain_db, -3.5)
 
+    def test_moracutter_extension_is_json_roundtrip(self):
+        project = Project(name="配布版")
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(Path(folder) / "test.moracutter")
+            save_project(project, path)
+            self.assertTrue(Path(path).read_text(encoding="utf-8").lstrip().startswith("{"))
+            loaded = load_project(path)
+        self.assertEqual(loaded.name, "配布版")
+
+    def test_future_project_version_is_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "future.moracutter"
+            path.write_text('{"version": 999}', encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "新しい形式"):
+                load_project(str(path))
+
     def test_old_projects_default_segments_to_auto_origin(self):
         segment = Segment.create("s", 0.1, 0.5, label="さ")
         raw = Project(segments=[segment]).to_dict()
         raw["segments"][0].pop("origin")
         loaded = Project.from_dict(raw)
         self.assertEqual(loaded.segments[0].origin, "auto")
+        self.assertEqual(loaded.version, 2)
 
     def test_reanalysis_replaces_auto_keeps_manual_and_can_undo(self):
         auto = Segment.create("s", 0.1, 0.2, label="あ")

@@ -25,7 +25,7 @@ except ImportError:
     AppBase = tk.Tk
 
 from . import __version__
-from .audio import AudioError, decode_mono, estimate_pitch, export_segment, play, probe, quality_metrics, safe_filename
+from .audio import AudioError, decode_mono, estimate_pitch, executable, export_segment, play, probe, quality_metrics, safe_filename
 # 自動音声認識は手入力版へ戻す間、UI・起動経路から外している。
 # from .detection import DISPLAY_RATE, baseline_detect, discover_models, external_detect
 from .detection import DISPLAY_RATE
@@ -34,10 +34,12 @@ from .history import History
 from .japanese import labels_for_unit
 # from .precision_detection import mfa_detect, kotoba_reazon_silero_detect
 from .project_io import load_project, save_project
+from .crash_logging import write_crash_log
+from .runtime import CACHE_DIR, CONFIG_DIR, INSTALL_DIR, RECOVERY_DIR, ensure_user_directories
 # from .whisper_detection import WhisperCancelled, whisper_detect
 
 
-APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
+APP_DIR = INSTALL_DIR
 UNIT_LABELS = {"モーラ": "mora", "一文字": "character", "音素": "phoneme"}
 UNIT_NAMES = {value: key for key, value in UNIT_LABELS.items()}
 
@@ -230,7 +232,9 @@ class FlickKanaPad(tk.Toplevel):
 class MoraCutterApp(AppBase):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Mora Cutter MVP")
+        ensure_user_directories()
+        self.title("Mora Cutter")
+        self._set_application_icon()
         self.geometry("1420x880")
         self.minsize(1050, 680)
 
@@ -311,6 +315,23 @@ class MoraCutterApp(AppBase):
         style.configure("Treeview", rowheight=25)
         style.configure("Accent.TButton", font=("TkDefaultFont", 10, "bold"))
 
+    def _set_application_icon(self) -> None:
+        resource_dir = APP_DIR / "resources"
+        try:
+            ico = resource_dir / "moracutter.ico"
+            if ico.exists() and sys.platform == "win32":
+                self.iconbitmap(default=str(ico))
+            png = resource_dir / "moracuttericon.png"
+            if png.exists():
+                self._application_icon = tk.PhotoImage(file=str(png))
+                self.iconphoto(True, self._application_icon)
+        except tk.TclError:
+            pass
+
+    def report_callback_exception(self, exc_type: type[BaseException], exc: BaseException, tb: object) -> None:
+        path = write_crash_log(exc_type, exc, tb)
+        messagebox.showerror("MoraCutter エラー", f"予期しないエラーが発生しました。\n\n{exc}\n\nログ保存先:\n{path}")
+
     def _restore_startup_focus(self) -> None:
         """Make the freshly launched desktop window ready for typing."""
         try:
@@ -346,7 +367,7 @@ class MoraCutterApp(AppBase):
         self.config(menu=bar)
 
     def _recent_projects_path(self) -> Path:
-        return APP_DIR / "recent_projects.json"
+        return CONFIG_DIR / "recent_projects.json"
 
     def _recent_projects(self) -> list[str]:
         try:
@@ -652,7 +673,12 @@ class MoraCutterApp(AppBase):
             paths = [str(path) for path in self.tk.splitlist(event.data)]
         except (tk.TclError, AttributeError):
             paths = []
-        self._add_audio_paths(paths)
+        projects = [path for path in paths if Path(path).suffix.lower() == ".moracutter" or path.lower().endswith(".mcp.json")]
+        if projects:
+            if self._confirm_discard():
+                self._load_project_path(projects[0])
+        else:
+            self._add_audio_paths(paths)
         return "break"
 
     def undo(self) -> None:
@@ -1963,12 +1989,12 @@ class MoraCutterApp(AppBase):
                 if model.kind == "whisper":
                     result = whisper_detect(
                         source.path, source.id, transcript, unit, model.model_id, use_gpu,
-                        APP_DIR / "models_cache", self._queue_progress, self._detection_cancel_event, assist_only=True,
+                        CACHE_DIR / "models", self._queue_progress, self._detection_cancel_event, assist_only=True,
                     )
                 elif model.kind == "mfa":
-                    result = mfa_detect(source.path, source.id, transcript, unit, APP_DIR / "models_cache", self._queue_progress, self._detection_cancel_event)
+                    result = mfa_detect(source.path, source.id, transcript, unit, CACHE_DIR / "models", self._queue_progress, self._detection_cancel_event)
                 elif model.kind == "kotoba_reazon_silero":
-                    result = kotoba_reazon_silero_detect(source.path, source.id, transcript, unit, use_gpu, APP_DIR / "models_cache", self._queue_progress, self._detection_cancel_event)
+                    result = kotoba_reazon_silero_detect(source.path, source.id, transcript, unit, use_gpu, CACHE_DIR / "models", self._queue_progress, self._detection_cancel_event)
                 elif model.command:
                     self._queue_progress(10, f"外部モデルを実行中: {model.name}")
                     result = external_detect(model, source.path, source.id, transcript, unit, use_gpu)
@@ -2011,12 +2037,12 @@ class MoraCutterApp(AppBase):
                     if model.kind == "whisper":
                         result = whisper_detect(
                             source.path, source.id, transcript, unit, model.model_id, use_gpu,
-                            APP_DIR / "models_cache", batch_progress, self._detection_cancel_event, assist_only=True,
+                            CACHE_DIR / "models", batch_progress, self._detection_cancel_event, assist_only=True,
                         )
                     elif model.kind == "mfa":
-                        result = mfa_detect(source.path, source.id, transcript, unit, APP_DIR / "models_cache", batch_progress, self._detection_cancel_event)
+                        result = mfa_detect(source.path, source.id, transcript, unit, CACHE_DIR / "models", batch_progress, self._detection_cancel_event)
                     elif model.kind == "kotoba_reazon_silero":
-                        result = kotoba_reazon_silero_detect(source.path, source.id, transcript, unit, use_gpu, APP_DIR / "models_cache", batch_progress, self._detection_cancel_event)
+                        result = kotoba_reazon_silero_detect(source.path, source.id, transcript, unit, use_gpu, CACHE_DIR / "models", batch_progress, self._detection_cancel_event)
                     elif model.command:
                         batch_progress(10, f"外部モデルを実行中: {model.name}")
                         result = external_detect(model, source.path, source.id, transcript, unit, use_gpu)
@@ -2080,7 +2106,7 @@ class MoraCutterApp(AppBase):
                 )
                 return False
         if model.kind == "whisper":
-            cache = APP_DIR / "models_cache"
+            cache = CACHE_DIR / "models"
             cache_has_files = cache.exists() and any(cache.iterdir())
             if not cache_has_files:
                 return messagebox.askyesno(
@@ -2322,7 +2348,7 @@ class MoraCutterApp(AppBase):
         depth = tk.IntVar(value=self.project.settings.bit_depth)
         normalize = tk.BooleanVar(value=self.project.settings.normalize)
         minutes = tk.IntVar(value=self.project.settings.autosave_minutes)
-        recovery = tk.StringVar(value=self.project.settings.recovery_folder or str(APP_DIR / "recovery"))
+        recovery = tk.StringVar(value=self.project.settings.recovery_folder or str(RECOVERY_DIR))
         ttk.Label(frame, text="出力サンプルレート").grid(row=0, column=0, sticky="w", pady=4)
         ttk.Combobox(frame, textvariable=rate, values=(44100, 48000), state="readonly", width=12).grid(row=0, column=1, sticky="ew")
         ttk.Label(frame, text="出力ビット深度").grid(row=1, column=0, sticky="w", pady=4)
@@ -2370,16 +2396,17 @@ class MoraCutterApp(AppBase):
         self.refresh_sources()
         self.refresh_segments()
         self.draw_audio()
-        self.title("Mora Cutter MVP")
+        self.title("Mora Cutter")
 
     def open_project(self) -> None:
-        path = filedialog.askopenfilename(title="プロジェクトを開く", filetypes=[("Mora Cutter project", "*.mcp.json"), ("JSON", "*.json")])
+        path = filedialog.askopenfilename(title="プロジェクトを開く", filetypes=[("MoraCutter project", "*.moracutter"), ("旧Mora Cutter project", "*.mcp.json"), ("JSON", "*.json"), ("すべて", "*.*")])
         if path:
             self._load_project_path(path)
 
     def _load_project_path(self, path: str) -> None:
         try:
             self.project = load_project(path)
+            relinked = self._relink_missing_sources()
             self._audio_load_token += 1
             self._audio_cache.clear()
             self.project_path = path
@@ -2391,10 +2418,10 @@ class MoraCutterApp(AppBase):
             self.history = History(100)
             self.export_checked_ids.clear()
             self._known_segment_ids.clear()
-            self._dirty = False
+            self._dirty = relinked
             self.refresh_sources()
             self._load_current_audio()
-            self.title(f"Mora Cutter MVP — {Path(path).name}")
+            self.title(f"Mora Cutter — {Path(path).name}")
             self.status_var.set("プロジェクトを開きました")
         except Exception as exc:
             messagebox.showerror("開けません", str(exc))
@@ -2415,19 +2442,49 @@ class MoraCutterApp(AppBase):
             return False
 
     def save_as(self) -> bool:
-        path = filedialog.asksaveasfilename(title="プロジェクトを保存", defaultextension=".mcp.json", filetypes=[("Mora Cutter project", "*.mcp.json")])
+        path = filedialog.asksaveasfilename(title="プロジェクトを保存", defaultextension=".moracutter", filetypes=[("MoraCutter project", "*.moracutter"), ("旧Mora Cutter project", "*.mcp.json"), ("JSON", "*.json")])
         if not path:
             return False
         self.project_path = path
-        self.project.name = Path(path).name.removesuffix(".mcp.json")
-        self.title(f"Mora Cutter MVP — {Path(path).name}")
+        self.project.name = Path(path).name.removesuffix(".moracutter").removesuffix(".mcp.json")
+        self.title(f"Mora Cutter — {Path(path).name}")
         return self.save()
+
+    def _relink_missing_sources(self) -> bool:
+        missing = [source for source in self.project.sources if not Path(source.path).is_file()]
+        if not missing:
+            return False
+        names = "\n".join(f"・{Path(source.path).name}" for source in missing[:8])
+        if len(missing) > 8:
+            names += f"\nほか {len(missing) - 8}件"
+        if not messagebox.askyesno("音声ファイルの再リンク", f"元音声が見つかりません。保存されているフォルダを選択して一括検索しますか？\n\n{names}"):
+            return False
+        folder = filedialog.askdirectory(title="元音声を検索するフォルダ")
+        if not folder:
+            return False
+        wanted = {Path(source.path).name.lower() for source in missing}
+        found: dict[str, Path] = {}
+        try:
+            for candidate in Path(folder).rglob("*"):
+                if candidate.is_file() and candidate.name.lower() in wanted:
+                    found.setdefault(candidate.name.lower(), candidate)
+        except OSError as exc:
+            messagebox.showwarning("再リンク", f"フォルダを検索できませんでした。\n{exc}")
+            return False
+        for source in missing:
+            replacement = found.get(Path(source.path).name.lower())
+            if replacement is not None:
+                source.path = str(replacement.resolve())
+        unresolved = sum(not Path(source.path).is_file() for source in missing)
+        relinked = len(missing) - unresolved
+        messagebox.showinfo("再リンク", f"{relinked}件を再リンクしました。\n未解決: {unresolved}件")
+        return bool(relinked)
 
     def _sync_settings(self) -> None:
         """Manual edition has no per-project automatic-recognition settings."""
 
     def _recovery_folder(self) -> Path:
-        return Path(self.project.settings.recovery_folder or APP_DIR / "recovery")
+        return Path(self.project.settings.recovery_folder or RECOVERY_DIR)
 
     def _schedule_autosave(self) -> None:
         if self._dirty and self.project.sources:
@@ -2436,7 +2493,7 @@ class MoraCutterApp(AppBase):
                 self._sync_settings()
                 folder = self._recovery_folder()
                 folder.mkdir(parents=True, exist_ok=True)
-                save_project(self.project, str(folder / "autosave.mcp.json"))
+                save_project(self.project, str(folder / "autosave.moracutter"))
                 self.secondary_status_var.set(f"自動保存: 完了（{datetime.now():%H:%M:%S}）")
             except Exception as exc:
                 self.secondary_status_var.set(f"自動保存: 失敗 — {exc}")
@@ -2444,14 +2501,17 @@ class MoraCutterApp(AppBase):
         self.after(delay, self._schedule_autosave)
 
     def _offer_recovery(self) -> None:
-        recovery = self._recovery_folder() / "autosave.mcp.json"
+        recovery = self._recovery_folder() / "autosave.moracutter"
+        legacy_recovery = self._recovery_folder() / "autosave.mcp.json"
+        if not recovery.exists() and legacy_recovery.exists():
+            recovery = legacy_recovery
         if recovery.exists() and messagebox.askyesno("復旧ファイル", "前回の自動復旧ファイルがあります。開きますか？"):
             self._load_project_path(str(recovery))
             self.project_path = None
             self._dirty = True
 
     def open_recovery(self) -> None:
-        path = filedialog.askopenfilename(initialdir=str(self._recovery_folder()), filetypes=[("Mora Cutter project", "*.mcp.json"), ("JSON", "*.json")])
+        path = filedialog.askopenfilename(initialdir=str(self._recovery_folder()), filetypes=[("MoraCutter project", "*.moracutter"), ("旧Mora Cutter project", "*.mcp.json"), ("JSON", "*.json")])
         if path:
             self._load_project_path(path)
             self.project_path = None
@@ -2460,8 +2520,14 @@ class MoraCutterApp(AppBase):
     def check_environment(self) -> None:
         python_ok = f"Python {sys.version.split()[0]}"
         numpy_ok = f"NumPy {np.__version__}"
-        ffmpeg = shutil.which("ffmpeg") or "見つかりません"
-        ffplay = shutil.which("ffplay") or "見つかりません"
+        try:
+            ffmpeg = executable("ffmpeg")
+        except AudioError:
+            ffmpeg = "見つかりません"
+        try:
+            ffplay = executable("ffplay")
+        except AudioError:
+            ffplay = "見つかりません"
         messagebox.showinfo("動作環境", f"{python_ok}\n{numpy_ok}\nFFmpeg: {ffmpeg}\nFFplay: {ffplay}")
 
     def _confirm_discard(self) -> bool:
@@ -2490,5 +2556,13 @@ class MoraCutterApp(AppBase):
 
 
 def main() -> None:
-    app = MoraCutterApp()
-    app.mainloop()
+    try:
+        app = MoraCutterApp()
+        app.mainloop()
+    except Exception as exc:
+        path = write_crash_log(type(exc), exc, exc.__traceback__)
+        if sys.platform == "win32":
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None, f"{exc}\n\nログ保存先:\n{path}", "MoraCutter エラー", 0x10)
+        else:
+            raise

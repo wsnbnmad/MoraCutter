@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory = $true)]
     [ValidatePattern('^[0-9A-Fa-f]{40}$')]
     [string]$CertificateThumbprint,
-    [string]$TimestampUrl = "http://timestamp.digicert.com"
+    [string]$TimestampUrl = "",
+    [switch]$AllowSelfSigned
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,7 +20,12 @@ if (-not $certificate.HasPrivateKey) {
     throw "The selected certificate has no private key."
 }
 $codeSigningOid = "1.3.6.1.5.5.7.3.3"
-if (-not ($certificate.EnhancedKeyUsageList.ObjectId.Value -contains $codeSigningOid)) {
+$usageOids = @($certificate.EnhancedKeyUsageList | ForEach-Object {
+    if ($_.ObjectId -is [string]) { $_.ObjectId }
+    elseif ($_.PSObject.Properties.Name -contains "ObjectId") { $_.ObjectId.Value }
+    else { $_.Value }
+})
+if ($usageOids -notcontains $codeSigningOid) {
     throw "The selected certificate is not valid for code signing."
 }
 if ($certificate.NotAfter -le (Get-Date)) {
@@ -35,23 +41,18 @@ if (-not $signTool) {
     throw "64-bit SignTool was not found. Install the Windows SDK signing tools."
 }
 
-& $signTool.FullName sign `
-    /sha1 $CertificateThumbprint `
-    /s My `
-    /fd SHA256 `
-    /tr $TimestampUrl `
-    /td SHA256 `
-    /d "Mora Cutter" `
-    /du "https://signal88.com/" `
-    $resolvedExecutable
+$arguments = @("sign", "/sha1", $CertificateThumbprint, "/s", "My", "/fd", "SHA256", "/d", "Mora Cutter", "/du", "https://signal88.com/")
+if ($TimestampUrl) { $arguments += @("/tr", $TimestampUrl, "/td", "SHA256") }
+$arguments += $resolvedExecutable
+& $signTool.FullName @arguments
 if ($LASTEXITCODE -ne 0) { throw "SignTool returned exit code $LASTEXITCODE." }
 
 & $signTool.FullName verify /pa /all /v $resolvedExecutable
-if ($LASTEXITCODE -ne 0) { throw "Signature verification failed." }
+if ($LASTEXITCODE -ne 0 -and -not $AllowSelfSigned) { throw "Signature verification failed." }
 
 $signature = Get-AuthenticodeSignature -LiteralPath $resolvedExecutable
-if ($signature.Status -ne "Valid") {
+if ($signature.Status -ne "Valid" -and -not $AllowSelfSigned) {
     throw "Authenticode status is $($signature.Status), not Valid."
 }
-Write-Output "Valid Authenticode signature: $($signature.SignerCertificate.Subject)"
-
+if (-not $signature.SignerCertificate) { throw "No Authenticode signer certificate was written." }
+Write-Output "Authenticode signer: $($signature.SignerCertificate.Subject); trust status: $($signature.Status)"

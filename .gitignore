@@ -11,6 +11,8 @@ dist/
 release/
 *.spec.bak
 *.zip
+*.pfx
+*.p12
 
 # Downloaded models and runtime-generated data
 models_cache/
@@ -18,8 +20,12 @@ recovery/
 *.recovery.json
 
 # Local project/audio outputs
+*.moracutter
 *.moracutter.json
+*.mcp.json
 exports/
+recent_projects.json
+ref/
 
 # Editors and OS
 .idea/

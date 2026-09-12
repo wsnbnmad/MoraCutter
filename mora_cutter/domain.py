@@ -7,6 +7,9 @@ from typing import Any
 import uuid
 
 
+PROJECT_FORMAT_VERSION = 2
+
+
 def _timestamp() -> str:
     """Return a local, sortable timestamp for project data."""
     return datetime.now().astimezone().isoformat(timespec="seconds")
@@ -76,7 +79,7 @@ class ProjectSettings:
 
 @dataclass
 class Project:
-    version: int = 1
+    version: int = PROJECT_FORMAT_VERSION
     name: str = "名称未設定"
     sources: list[AudioSource] = field(default_factory=list)
     segments: list[Segment] = field(default_factory=list)
@@ -99,7 +102,9 @@ class Project:
         if not collection_list:
             collection_list = next((value for value in transcripts.values() if value.strip()), "")
         return cls(
-            version=int(raw.get("version", 1)),
+            # Loading an older document migrates it to the current in-memory
+            # representation; the next save writes the current version.
+            version=PROJECT_FORMAT_VERSION,
             name=raw.get("name", "名称未設定"),
             sources=[AudioSource(**v) for v in raw.get("sources", [])],
             # Older projects may contain auto-recognition confidence/rank
@@ -110,5 +115,8 @@ class Project:
             }) for v in raw.get("segments", [])],
             collection_list=collection_list,
             transcripts=transcripts,
-            settings=ProjectSettings(**raw.get("settings", {})),
+            settings=ProjectSettings(**{
+                key: value for key, value in raw.get("settings", {}).items()
+                if key in ProjectSettings.__dataclass_fields__
+            }),
         )

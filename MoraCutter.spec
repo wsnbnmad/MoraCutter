@@ -1,18 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_dynamic_libs
+from PyInstaller.utils.hooks import collect_all
 
 root = Path(SPEC).resolve().parent
-whisper_assets = collect_data_files("faster_whisper", includes=["assets/*"])
 tkdnd_datas, tkdnd_binaries, tkdnd_hiddenimports = collect_all("tkinterdnd2")
-cuda_binaries = collect_dynamic_libs("nvidia.cublas", destdir=".")
 
 a = Analysis(
     [str(root / "main.py")],
     pathex=[str(root)],
-    binaries=tkdnd_binaries + cuda_binaries,
-    datas=whisper_assets + tkdnd_datas,
+    binaries=tkdnd_binaries,
+    datas=tkdnd_datas + [(str(root / "resources"), "resources")],
     hiddenimports=tkdnd_hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -29,6 +27,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="MoraCutter",
+    icon=str(root / "resources" / "moracutter.ico"),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

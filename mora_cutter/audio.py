@@ -12,6 +12,8 @@ from typing import Callable
 
 import numpy as np
 
+from .runtime import INSTALL_DIR, TOOLS_DIR
+
 
 class AudioError(RuntimeError):
     pass
@@ -32,10 +34,11 @@ def _hidden_subprocess_kwargs() -> dict[str, object]:
 
 @lru_cache(maxsize=None)
 def executable(name: str) -> str:
-    runtime_root = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
-    bundled = runtime_root / "bin" / (name + ".exe" if sys.platform == "win32" else name)
-    if bundled.exists():
-        return str(bundled)
+    filename = name + ".exe" if sys.platform == "win32" else name
+    candidates = (INSTALL_DIR / "tools" / "ffmpeg" / "bin" / filename, INSTALL_DIR / "bin" / filename, TOOLS_DIR / "ffmpeg" / "bin" / filename)
+    for bundled in candidates:
+        if bundled.exists():
+            return str(bundled)
     found = shutil.which(name)
     if not found:
         raise AudioError(f"{name} が見つかりません。PATHへFFmpegを追加してください。")

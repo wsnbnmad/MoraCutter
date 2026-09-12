@@ -1,0 +1,42 @@
+name: Build Windows candidates
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            architecture: x64
+          - runner: windows-11-arm
+            architecture: ARM64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Select native Python
+        shell: pwsh
+        run: |
+          python -c "import platform; print(platform.machine())"
+      - name: Install FFmpeg tools
+        shell: pwsh
+        run: |
+          $manifest = Get-Content ffmpeg-manifest.json -Raw | ConvertFrom-Json
+          Invoke-WebRequest -UseBasicParsing $manifest.source -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-package
+          $bin = Get-ChildItem ffmpeg-package -Filter ffmpeg.exe -Recurse | Select-Object -First 1 | ForEach-Object DirectoryName
+          "FFMPEG_BIN=$bin" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Build and test unsigned candidate
+        shell: pwsh
+        run: |
+          ./build_windows.ps1 -Python python -Architecture "${{ matrix.architecture }}" -FFmpegBin $env:FFMPEG_BIN
+      - name: Upload candidate for local signing
+        uses: actions/upload-artifact@v4
+        with:
+          name: MoraCutter-v1.0.0-Windows-${{ matrix.architecture }}-unsigned
+          path: release/MoraCutter-v1.0.0-Windows-${{ matrix.architecture }}/
+          if-no-files-found: error

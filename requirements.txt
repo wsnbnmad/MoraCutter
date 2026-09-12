@@ -1,2 +1,2 @@
-numpy>=1.24
-tkinterdnd2>=0.6.2
+numpy==2.5.3
+tkinterdnd2==0.6.3
