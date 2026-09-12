@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 import uuid
+
+
+def _timestamp() -> str:
+    """Return a local, sortable timestamp for project data."""
+    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 @dataclass
@@ -40,11 +46,15 @@ class Segment:
     gain_db: float = 0.0
     order: int = 0
     origin: str = "auto"
+    created_at: str = field(default_factory=_timestamp)
+    updated_at: str = field(default_factory=_timestamp)
 
     @classmethod
     def create(cls, source_id: str, start: float, end: float, **kwargs: Any) -> "Segment":
         cue = float(kwargs.pop("cue", start))
-        return cls(str(uuid.uuid4()), source_id, float(start), cue, float(end), **kwargs)
+        created_at = kwargs.pop("created_at", _timestamp())
+        kwargs.setdefault("updated_at", created_at)
+        return cls(str(uuid.uuid4()), source_id, float(start), cue, float(end), created_at=created_at, **kwargs)
 
     def clamp(self, duration: float) -> None:
         self.start = max(0.0, min(self.start, duration))

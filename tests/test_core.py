@@ -94,6 +94,14 @@ class DomainTests(unittest.TestCase):
         self.assertEqual(pitch, "A4")
         self.assertGreater(stability, 0.5)
 
+    def test_segment_records_sortable_timestamps(self):
+        segment = Segment.create("source", 0.0, 1.0)
+        self.assertEqual(segment.created_at, segment.updated_at)
+        self.assertTrue(segment.created_at)
+        project = Project.from_dict({"segments": [{"id": "old", "source_id": "source", "start": 0, "cue": 0, "end": 1}]})
+        self.assertTrue(project.segments[0].created_at)
+        self.assertTrue(project.segments[0].updated_at)
+
     def test_windows_subprocesses_are_hidden(self):
         options = _hidden_subprocess_kwargs()
         if sys.platform == "win32":

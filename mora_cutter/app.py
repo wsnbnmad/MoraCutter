@@ -495,18 +495,21 @@ class MoraCutterApp(AppBase):
         ttk.Button(search_row, text="全表示", command=self._clear_coverage_filter).pack(side="right", padx=(0, 5))
         self.search_var.trace_add("write", self._search_changed)
 
-        columns = ("export", "label", "source", "pitch", "start", "end")
+        columns = ("export", "label", "source", "pitch", "start", "end", "created", "updated")
         self.segment_tree = ttk.Treeview(candidates, columns=columns, show="headings", selectmode="extended")
-        headings = {"export":"書出", "label":"発音", "source":"素材", "pitch":"音程", "start":"開始", "end":"終了"}
-        widths = {"export":46, "label":105, "source":165, "pitch":70, "start":95, "end":95}
+        self.list_headings = {
+            "export": "書出", "label": "発音", "source": "素材", "pitch": "音程",
+            "start": "開始", "end": "終了", "created": "作成日時", "updated": "変更日時",
+        }
+        self.sortable_list_columns = {"label", "source", "pitch", "start", "created", "updated"}
+        widths = {"export":46, "label":105, "source":165, "pitch":70, "start":95, "end":95, "created":145, "updated":145}
         for key in columns:
-            command = (lambda column=key: self._sort_list(column)) if key in {"label", "source", "pitch", "start"} else None
-            if command is None:
-                self.segment_tree.heading(key, text=headings[key])
-            else:
-                self.segment_tree.heading(key, text=headings[key], command=command)
             self.segment_tree.column(key, width=widths[key], anchor="center", stretch=key == "label")
         self.segment_tree.pack(fill="both", expand=True)
+        list_scroll_x = ttk.Scrollbar(candidates, orient="horizontal", command=self.segment_tree.xview)
+        list_scroll_x.pack(fill="x")
+        self.segment_tree.configure(xscrollcommand=list_scroll_x.set)
+        self._update_sort_headings()
         self.segment_tree.bind("<<TreeviewSelect>>", self._segment_selected)
         self.segment_tree.bind("<Button-1>", self._tree_checkbox_click, add="+")
         self.segment_tree.bind("<Double-1>", lambda _: self.play_cue())
@@ -1176,6 +1179,8 @@ class MoraCutterApp(AppBase):
                 self._resume_pointer_playback(source.path, self.playhead_time, self._pointer_resume_end)
         elif self.drag_mode in ("start", "cue", "end"):
             segment = self.draft_segment or self.current_segment()
+            if segment is not None and any(saved.id == segment.id for saved in self.project.segments):
+                self._touch_segment(segment)
             self._dirty = True
             self.refresh_segments()
             self.status_var.set("開始・cue・終了位置を調整しました")
@@ -1399,6 +1404,8 @@ class MoraCutterApp(AppBase):
         self._analyze_segment(segment)
         if not any(existing.id == segment.id for existing in self.project.segments):
             self.project.segments.append(segment)
+        else:
+            self._touch_segment(segment)
         self.current_segment_id = segment.id
         self.manual_next_start = segment.end
         self.draft_segment = None
@@ -1428,6 +1435,7 @@ class MoraCutterApp(AppBase):
         self._record()
         segment.label = label
         segment.unit = "character"
+        self._touch_segment(segment)
         self.manual_label_var.set(label)
         self._after_project_change(f"発音を「{label}」へ変更しました")
 
@@ -1461,6 +1469,19 @@ class MoraCutterApp(AppBase):
         clarity, noise = quality_metrics(self.current_samples[a:b], DISPLAY_RATE)
         segment.quality_score = 0.45*clarity + 0.30*noise + 0.25*stability
 
+    @staticmethod
+    def _format_segment_timestamp(value: str) -> str:
+        if not value:
+            return "—"
+        try:
+            return datetime.fromisoformat(value).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return value
+
+    @staticmethod
+    def _touch_segment(segment: Segment) -> None:
+        segment.updated_at = datetime.now().astimezone().isoformat(timespec="seconds")
+
     def refresh_segments(self) -> None:
         self._segment_index = {segment.id: segment for segment in self.project.segments}
         all_ids = {segment.id for segment in self.project.segments}
@@ -1492,6 +1513,8 @@ class MoraCutterApp(AppBase):
                 "source": lambda item: (source_names.get(item.source_id, ""), item.start, item.order),
                 "pitch": lambda item: (item.pitch.lower(), item.start, item.order),
                 "start": lambda item: (item.start, item.order),
+                "created": lambda item: (getattr(item, "created_at", ""), item.order),
+                "updated": lambda item: (getattr(item, "updated_at", ""), item.order),
             }
             segments = sorted(segments, key=key_functions[self.list_sort_key], reverse=self.list_sort_reverse)
             duplicate_numbers: dict[str, int] = {}
@@ -1502,7 +1525,12 @@ class MoraCutterApp(AppBase):
                 occurrence = duplicate_numbers[segment.label]
                 display_label = segment.label if occurrence == 1 else f"{segment.label} ({occurrence})"
                 mark = "☑" if segment.id in self.export_checked_ids else "☐"
-                desired.append((segment.id, (mark, display_label, source_name, segment.pitch, f"{segment.start:.3f}", f"{segment.end:.3f}")))
+                desired.append((segment.id, (
+                    mark, display_label, source_name, segment.pitch,
+                    f"{segment.start:.3f}", f"{segment.end:.3f}",
+                    self._format_segment_timestamp(getattr(segment, "created_at", "")),
+                    self._format_segment_timestamp(getattr(segment, "updated_at", "")),
+                )))
             desired_ids = {segment_id for segment_id, _ in desired}
             existing_ids = set(self.segment_tree.get_children())
             obsolete = existing_ids - desired_ids
@@ -1588,7 +1616,17 @@ class MoraCutterApp(AppBase):
         else:
             self.list_sort_key = column
             self.list_sort_reverse = False
+        self._update_sort_headings()
         self.refresh_segments()
+
+    def _update_sort_headings(self) -> None:
+        """Show both the active sort column and its current direction."""
+        for key, label in self.list_headings.items():
+            arrow = ""
+            if key == self.list_sort_key:
+                arrow = " ▼" if self.list_sort_reverse else " ▲"
+            command = (lambda column=key: self._sort_list(column)) if key in self.sortable_list_columns else ""
+            self.segment_tree.heading(key, text=f"{label}{arrow}", command=command)
 
     def _segment_selected(self, _: object = None) -> None:
         if self._refreshing_segment_tree:
@@ -1665,6 +1703,7 @@ class MoraCutterApp(AppBase):
         segment.clamp(source.duration)
         if timing_changed:
             self._analyze_segment(segment)
+        self._touch_segment(segment)
         self._after_project_change(status)
         return True
 
@@ -1724,6 +1763,7 @@ class MoraCutterApp(AppBase):
             elif segment.label == "(息)":
                 segment.label = segment.label_before_voice_type or "未分類"
                 segment.label_before_voice_type = ""
+        self._touch_segment(segment)
         self._fill_detail(segment)
         self._after_project_change("発声種別を更新しました")
 
@@ -1737,6 +1777,7 @@ class MoraCutterApp(AppBase):
         self._record()
         segment.cue += amount
         segment.clamp(source.duration)
+        self._touch_segment(segment)
         self._after_project_change(f"cue: {segment.cue:.4f}秒")
 
     def delete_segment(self) -> None:
