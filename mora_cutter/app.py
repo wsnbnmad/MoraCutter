@@ -2107,10 +2107,18 @@ class MoraCutterApp(AppBase):
         if not segments:
             messagebox.showinfo("書き出し対象がありません", "リストで書き出す候補にチェックを付けてください。")
             return
+        export_format = self._choose_export_format()
+        if export_format is None:
+            return
         folder = filedialog.askdirectory(title="WAVの書き出し先")
         if not folder:
             return
+        sample_rate, bit_depth = export_format
         settings = self.project.settings
+        if settings.sample_rate != sample_rate or settings.bit_depth != bit_depth:
+            self._record()
+            settings.sample_rate = sample_rate
+            settings.bit_depth = bit_depth
         self._set_progress(0, f"書き出し準備: {len(segments)}件")
         sources = {s.id: s for s in self.project.sources}
         def worker() -> None:
@@ -2146,6 +2154,45 @@ class MoraCutterApp(AppBase):
                         errors.append(f"{filename}: {exc}")
             self.jobs.put(("export_done", (exported, errors, folder)))
         threading.Thread(target=worker, daemon=True).start()
+
+    def _choose_export_format(self) -> tuple[int, int] | None:
+        """Ask for the WAV format immediately before choosing an output folder."""
+        window = tk.Toplevel(self)
+        window.title("書き出し形式")
+        window.resizable(False, False)
+        window.transient(self)
+        frame = ttk.Frame(window, padding=14)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="WAV書き出し形式", font=("TkDefaultFont", 11, "bold")).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 10)
+        )
+        rate = tk.IntVar(value=self.project.settings.sample_rate)
+        depth = tk.IntVar(value=self.project.settings.bit_depth)
+        ttk.Label(frame, text="サンプルレート").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Combobox(frame, textvariable=rate, values=(44100, 48000), state="readonly", width=12).grid(
+            row=1, column=1, sticky="ew", padx=(12, 0)
+        )
+        ttk.Label(frame, text="ビット深度").grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Combobox(frame, textvariable=depth, values=(16, 24), state="readonly", width=12).grid(
+            row=2, column=1, sticky="ew", padx=(12, 0)
+        )
+        ttk.Label(frame, text="選択内容は次回の初期値として保存されます", foreground="#68727d").grid(
+            row=3, column=0, columnspan=2, sticky="w", pady=(8, 0)
+        )
+        result: dict[str, tuple[int, int] | None] = {"value": None}
+
+        def confirm() -> None:
+            result["value"] = (rate.get(), depth.get())
+            window.destroy()
+
+        buttons = ttk.Frame(frame)
+        buttons.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(14, 0))
+        ttk.Button(buttons, text="キャンセル", command=window.destroy).pack(side="right")
+        ttk.Button(buttons, text="保存先を選択", style="Accent.TButton", command=confirm).pack(side="right", padx=(0, 6))
+        window.protocol("WM_DELETE_WINDOW", window.destroy)
+        window.grab_set()
+        self.wait_window(window)
+        return result["value"]
 
     def show_coverage(self) -> None:
         window = tk.Toplevel(self)
