@@ -1,15 +1,13 @@
 # MoraCutter
 
-音MAD・YTPMV向けの、人力ボーカロイド用音声切り出し支援ツールです。手入力による素早い切り出しに専念し、音声処理はPC内で完結します。
+人力ボーカロイド用音声切り出し支援ツールです。手入力による素早い切り出しに専念し、音声処理はPC内で完結します。
 
 ## ダウンロード
 
-[GitHub Releases](https://github.com/wsnbnmad/MoraCutter/releases)から、お使いのPCに合うZIPをダウンロードしてください。
+[GitHub Releases](https://github.com/wsnbnmad/MoraCutter/releases)からZIPをダウンロードしてください。
 
-- 一般的なIntel / AMD搭載PC: `Windows-x64.zip`
-- ソースコードを確認・利用する場合: `Source.zip`
 
-Windows 10 / 11のx64版に対応しています。インストール、Python、管理者権限は必要ありません。
+Windows 10 / 11のx64版に対応しています。
 
 ## はじめ方
 
