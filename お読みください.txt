@@ -11,11 +11,11 @@ ZIPを任意のフォルダへ展開し、MoraCutter.exeを起動してくださ
 
 自己署名について
 ----------------
-MoraCutter.exeはsignal88.comの自己署名証明書で署名される配布構成です。
+MoraCutter.exeはsignal88.com名義で署名されています。
 公開認証局の証明書ではないため、Windows Defender SmartScreenが警告する場合があります。
-同梱のMoraCutter-public.cerは署名確認用の公開証明書です。秘密鍵は含まれません。
-証明書のインストールは必須ではなく、自動インストールも行いません。
-GitHub Releasesに掲載されたSHA-256とSHA256SUMS.txtを照合してから使用してください。
+同梱のMoraCutter-public.cerは署名情報を確認するための公開証明書です。
+MoraCutterを使うために証明書をインストールする必要はなく、自動的にインストールされることもありません。
+MoraCutterは公式のGitHub Releasesからダウンロードしてください。必要に応じて、GitHubに表示されるダイジェストとSHA256SUMS.txtを照合できます。
 
 基本操作
 --------

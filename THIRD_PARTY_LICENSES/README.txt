@@ -1,13 +1,7 @@
-MoraCutter配布版に同梱する第三者コンポーネントのライセンスです。
+このフォルダーには、MoraCutterで使用している第三者ソフトウェアのライセンス情報が入っています。
 
-GPL-3.0.txt / LGPL-2.1.txt:
-同梱するFFmpegの構成に応じて適用されます。FFmpeg-build-information.txtに実際のビルド設定を記録します。
+GPL-3.0.txtとLGPL-2.1.txtは、同梱されているFFmpegに関するライセンスです。FFmpegの詳しい情報はFFmpeg-build-information.txtで確認できます。
 
-ビルド時に次のライセンスも自動収集されます。
-- Python
-- Tcl/Tk
-- NumPy
-- tkinterdnd2 / TkDND
-- PyInstaller bootloader
+そのほか、Python、Tcl/Tk、NumPy、tkinterdnd2 / TkDND、PyInstaller bootloaderのライセンスを収録しています。
 
-各コンポーネントの著作権と条件は、それぞれのライセンス本文に従います。
+各ソフトウェアの著作権と利用条件は、それぞれのライセンス本文に従います。

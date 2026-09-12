@@ -1,5 +1,4 @@
 # UTF-8
-# PyInstaller / Windows version resource for Mora Cutter.
 VSVersionInfo(
   ffi=FixedFileInfo(
     filevers=(1, 0, 0, 0),

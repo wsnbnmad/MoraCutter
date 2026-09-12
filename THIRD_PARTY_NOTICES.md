@@ -1,11 +1,10 @@
-# Third-party components included in the manual v1.0.0 distribution
+# MoraCutterで使用している第三者ソフトウェア
 
-MoraCutterとは独立して、以下のコンポーネントにそれぞれのライセンスが適用されます。配布時に実際のバージョンとライセンス本文を`THIRD_PARTY_LICENSES`へ収録します。
+MoraCutterとは別に、次のソフトウェアにはそれぞれのライセンスが適用されます。ライセンス本文は配布ZIP内の`THIRD_PARTY_LICENSES`フォルダーで確認できます。
 
 - tkinterdnd2 / TkDND — MIT系ライセンス — https://github.com/pmgagne/tkinterdnd2
 - NumPy — BSD-3-Clause License — https://github.com/numpy/numpy
-- FFmpeg — configured buildに応じてLGPL/GPL — https://ffmpeg.org/legal.html
+- FFmpeg — 配布される構成に応じてLGPLまたはGPL — https://ffmpeg.org/legal.html
 - Python — PSF License — https://docs.python.org/3/license.html
 - Tcl/Tk — BSD-style license — https://www.tcl.tk/software/tcltk/license.html
-
-自動音声認識コードはソース内に保留されていますが、手動版EXEにはモデルや自動認識用依存を同梱しません。
+- PyInstaller bootloader — GPL-2.0-or-later（例外条項付き） — https://pyinstaller.org/en/stable/license.html

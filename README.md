@@ -1,61 +1,57 @@
 # MoraCutter
 
-音MAD・YTPMV向けの、人力ボーカロイド用音声切り出し支援ツールです。v1.0.0は手入力による高速な切り出しに専念し、音声処理はローカルで完結します。
+音MAD・YTPMV向けの、人力ボーカロイド用音声切り出し支援ツールです。手入力による素早い切り出しに専念し、音声処理はPC内で完結します。
 
-## 配布版
+## ダウンロード
 
-- Windows 10 / 11
-- x64およびネイティブARM64
-- インストール、Python、管理者権限は不要
-- WAV / MP3などFFmpeg対応音声
-- `.moracutter`（UTF-8 JSON）と旧`.mcp.json`をサポート
-- 利用者データは`%LOCALAPPDATA%\MoraCutter`へ保存
-- 自動音声認識はUIから無効化し、配布EXEにもモデルを含めない
+[GitHub Releases](https://github.com/wsnbnmad/MoraCutter/releases)から、お使いのPCに合うZIPをダウンロードしてください。
 
-利用方法は配布物の`お読みください.txt`を参照してください。
+- 一般的なIntel / AMD搭載PC: `Windows-x64.zip`
+- Windows on ARM搭載PC: `Windows-ARM64.zip`
+- ソースコードを確認・利用する場合: `Source.zip`
 
-## ソースから起動
+Windows 10 / 11に対応しています。インストール、Python、管理者権限は必要ありません。
 
-Python 3.10以上とFFmpegが必要です。
+## はじめ方
 
-```powershell
-python -m pip install -r requirements.txt
-python main.py
-```
+1. ダウンロードしたZIPを任意のフォルダーへ展開します。
+2. 展開先の`MoraCutter.exe`を起動します。
+3. 音声ファイルをドラッグ＆ドロップ、または「音声を追加」から読み込みます。
+4. 波形を右ドラッグして範囲を選び、発音を入力してEnterでリストへ追加します。
+5. 必要な項目にチェックを付け、保存先と音声形式を選んで書き出します。
 
-## テスト
+詳しい操作方法は、配布ZIPに入っている`お読みください.txt`を参照してください。
 
-```powershell
-python -m unittest discover -s tests -v
-```
+## 主な機能
 
-## Windowsビルド
+- WAV / MP3などの音声を読み込み
+- 波形のズーム、スクロール、範囲選択、cue調整、ループ再生
+- 複数素材をまとめたリスト表示、検索、並べ替え、選択書き出し
+- 収集用リストと五十音表による不足音の確認
+- `.moracutter`形式でプロジェクトを保存
+- サンプリング周波数とビット深度を選んで個別WAVを書き出し
+- 復旧データの自動保存
 
-FFmpegの`bin`フォルダを明示し、実行中のPythonと同じCPUアーキテクチャを指定します。
+音声やプロジェクトの内容を外部へ自動送信することはありません。
 
-```powershell
-./build_windows.ps1 -Architecture x64 -FFmpegBin C:\path\to\ffmpeg\bin
-```
+## プロジェクトファイル
 
-ARM64版はWindows ARM64上のネイティブPythonで実行します。
+標準形式は`.moracutter`です。旧`.mcp.json`と`.json`も読み書きできます。
 
-```powershell
-./build_windows.ps1 -Architecture ARM64 -FFmpegBin C:\path\to\ffmpeg\bin
-```
+プロジェクトファイルには元音声そのものではなく、元音声の保存場所が記録されます。元音声を移動した場合は、プロジェクトを開いた際の案内から再リンクしてください。
 
-自己署名証明書を作る場合:
+## データの保存場所
 
-```powershell
-./create_self_signed_certificate.ps1
-./build_windows.ps1 -Architecture x64 -FFmpegBin C:\path\to\ffmpeg\bin -CertificateThumbprint 40文字の拇印
-```
+設定、履歴、復旧データ、ログは`%LOCALAPPDATA%\MoraCutter`に保存されます。
 
-GitHub Actionsはx64とARM64の未署名候補を別々に生成します。候補を確認後、秘密鍵を保持するローカル環境で`finalize_windows_package.ps1`を使って署名・ハッシュ作成・ZIP化します。秘密鍵やPFXはリポジトリへ保存しません。公開先は`wsnbnmad/MoraCutter`です。
+## Windowsの警告について
 
-## プロジェクト互換性
+MoraCutterは自己署名されているため、Windows Defender SmartScreenが警告を表示する場合があります。公式の[GitHub Releases](https://github.com/wsnbnmad/MoraCutter/releases)からダウンロードしたファイルを使用してください。詳しくは[Windowsで表示される署名警告について](CODE_SIGNING.md)を参照してください。
 
-`.moracutter`の中身はバージョン番号を持つJSONです。旧形式を読み書きでき、未知の新しい形式は破損を避けるため明示的に拒否します。元音声は埋め込まず絶対パスで参照し、見つからない場合は選択フォルダから同名ファイルを一括再リンクできます。
+## 不具合報告
+
+[GitHub Issues](https://github.com/wsnbnmad/MoraCutter/issues)から報告できます。エラーが発生した場合、ログは`%LOCALAPPDATA%\MoraCutter\logs`に保存されます。内容を確認してから添付してください。
 
 ## ライセンス
 
-MoraCutterは[MIT License](LICENSE.txt)です。同梱される第三者コンポーネントは[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)および配布物の`THIRD_PARTY_LICENSES`を参照してください。
+MoraCutterは[MIT License](LICENSE.txt)です。同梱される第三者ソフトウェアについては[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)を参照してください。

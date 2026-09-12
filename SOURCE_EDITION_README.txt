@@ -1,40 +1,39 @@
-Mora Cutter MVP - ソース公開版
-================================
+MoraCutter v1.0.0 ソース版
+============================
 
-この配布物にはEXEファイルを含めていません。
-すべてのプログラムをテキストエディターで確認できます。
+このZIPにはMoraCutterのソースコードが入っています。
+すぐに使えるWindows版は、公式のGitHub Releasesからダウンロードできます。
+https://github.com/wsnbnmad/MoraCutter/releases
 
 必要なもの
 ------------
 - Python 3.10以上
-- NumPy
 - FFmpeg / FFprobe / FFplay
 
-Windowsでの準備
----------------
-1. Python公式配布版をインストールします。
-2. コマンドプロンプトまたはPowerShellで次を実行します。
+起動方法
+--------
+1. このフォルダーでコマンドプロンプトまたはPowerShellを開きます。
+2. 必要なパッケージをインストールします。
 
-   python -m pip install numpy
+   python -m pip install -r requirements.txt
 
-3. FFmpeg、FFprobe、FFplayへPATHを通します。
-4. MoraCutter.pywをダブルクリックします。
-
-コンソールで起動する場合
-------------------------
-このフォルダーで次を実行します。
+3. MoraCutterを起動します。
 
    python main.py
 
 macOS / Linux
 -------------
+macOSとLinux向けの完成版は配布していません。環境に合わせてPythonとFFmpegを準備し、次のコマンドで起動してください。
 
-   python3 -m pip install numpy
+   python3 -m pip install -r requirements.txt
    python3 main.py
 
-安全性を確認する場合
---------------------
-- MoraCutter.pyw、main.py、mora_cutterフォルダー内はすべて通常のテキストです。
-- 音声処理はローカルのFFmpegを呼び出します。
-- ネットワークへ音声を送信するコードはありません。
-- modelsフォルダーへ外部モデルを追加した場合は、そのモデルを別途確認してください。
+動作環境によっては追加の設定が必要になる場合があります。
+
+データの取り扱い
+----------------
+音声処理はPC内で行われます。音声やプロジェクトの内容を外部へ自動送信することはありません。
+
+ライセンス
+----------
+MoraCutter本体はMIT Licenseです。第三者ソフトウェアには、それぞれのライセンスが適用されます。
