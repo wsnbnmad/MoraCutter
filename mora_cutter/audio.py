@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from functools import lru_cache
 from pathlib import Path
 from typing import Callable
 
@@ -29,6 +30,7 @@ def _hidden_subprocess_kwargs() -> dict[str, object]:
     }
 
 
+@lru_cache(maxsize=None)
 def executable(name: str) -> str:
     runtime_root = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
     bundled = runtime_root / "bin" / (name + ".exe" if sys.platform == "win32" else name)
@@ -70,7 +72,10 @@ def decode_mono(path: str, sample_rate: int = 8000) -> np.ndarray:
 
 def play(path: str, start: float, end: float, loop: bool = False, speed: float = 1.0, gain_db: float = 0.0) -> subprocess.Popen[bytes]:
     duration = max(0.02, end - start)
-    command = [executable("ffplay"), "-v", "error", "-nodisp", "-autoexit"]
+    command = [
+        executable("ffplay"), "-v", "error", "-nodisp", "-autoexit",
+        "-probesize", "32768", "-analyzeduration", "0",
+    ]
     command += ["-ss", f"{start:.6f}", "-t", f"{duration:.6f}"]
     filters: list[str] = []
     if speed != 1.0:
@@ -118,18 +123,33 @@ def export_segment(
 def estimate_pitch(samples: np.ndarray, sample_rate: int = 8000) -> tuple[str, float]:
     if len(samples) < sample_rate // 30:
         return "--", 0.0
-    x = samples.astype(np.float64)
+    # A bounded central window is sufficient for a representative pitch and
+    # avoids quadratic work on long selections.
+    limit = max(sample_rate // 4, int(sample_rate * 0.75))
+    if len(samples) > limit:
+        offset = (len(samples) - limit) // 2
+        samples = samples[offset:offset + limit]
+    x = samples.astype(np.float32)
     x -= np.mean(x)
     rms = float(np.sqrt(np.mean(x * x)))
     if rms < 0.005:
         return "--", 0.0
     x *= np.hanning(len(x))
-    corr = np.correlate(x, x, mode="full")[len(x)-1:]
+    fft_size = 1 << (2 * len(x) - 1).bit_length()
+    spectrum = np.fft.rfft(x, n=fft_size)
+    corr = np.fft.irfft(spectrum * np.conjugate(spectrum), n=fft_size)[:len(x)]
     lo = max(1, sample_rate // 1000)
     hi = min(len(corr) - 1, sample_rate // 60)
     if hi <= lo:
         return "--", 0.0
-    lag = lo + int(np.argmax(corr[lo:hi]))
+    region = corr[lo:hi]
+    local_peaks = np.flatnonzero((region[1:-1] >= region[:-2]) & (region[1:-1] > region[2:])) + 1
+    if len(local_peaks):
+        strong = local_peaks[region[local_peaks] >= float(region.max()) * 0.80]
+        peak_index = int(strong[0] if len(strong) else local_peaks[np.argmax(region[local_peaks])])
+    else:
+        peak_index = int(np.argmax(region))
+    lag = lo + peak_index
     hz = sample_rate / lag
     midi = int(round(69 + 12 * math.log2(hz / 440.0)))
     names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]

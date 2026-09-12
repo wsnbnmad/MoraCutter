@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from mora_cutter.app import MoraCutterApp, _peak_envelope
-from mora_cutter.audio import _hidden_subprocess_kwargs
+from mora_cutter.app import MoraCutterApp, _build_peak_pyramid, _peak_envelope
+from mora_cutter.audio import _hidden_subprocess_kwargs, estimate_pitch
 from mora_cutter.domain import Project, Segment
 from mora_cutter.detection import discover_models
 from mora_cutter.history import History
@@ -83,6 +83,17 @@ class DomainTests(unittest.TestCase):
         peaks = _peak_envelope(samples, 4)
         np.testing.assert_allclose(peaks, [1.0, 0.5, 0.8, 0.3])
 
+    def test_peak_pyramid_preserves_block_maxima(self):
+        levels = _build_peak_pyramid(np.array([0.1, -0.8, 0.3, -0.2], dtype=np.float32))
+        np.testing.assert_allclose(levels[1], [0.8, 0.3])
+
+    def test_fft_pitch_estimation(self):
+        rate = 8000
+        samples = np.sin(2 * np.pi * 440 * np.arange(rate) / rate).astype(np.float32)
+        pitch, stability = estimate_pitch(samples, rate)
+        self.assertEqual(pitch, "A4")
+        self.assertGreater(stability, 0.5)
+
     def test_windows_subprocesses_are_hidden(self):
         options = _hidden_subprocess_kwargs()
         if sys.platform == "win32":
@@ -145,6 +156,16 @@ class DomainTests(unittest.TestCase):
         self.assertEqual(restored.name, "before")
         redone = history.redo(restored)
         self.assertEqual(redone.name, "after")
+
+    def test_history_coalesces_continuous_edits(self):
+        history = History(100)
+        project = Project(name="before")
+        history.record(project, "detail:1")
+        project.name = "middle"
+        history.record(project, "detail:1")
+        project.name = "after"
+        restored = history.undo(project)
+        self.assertEqual(restored.name, "before")
 
 
 if __name__ == "__main__":

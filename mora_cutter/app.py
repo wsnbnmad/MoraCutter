@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from copy import deepcopy
+from collections import Counter, OrderedDict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import json
 import math
@@ -84,6 +85,17 @@ def _peak_envelope(samples: np.ndarray, bins: int) -> np.ndarray:
         return absolute
     edges = np.linspace(0, len(absolute), bins + 1, dtype=np.int64)
     return np.maximum.reduceat(absolute, edges[:-1])
+
+
+def _build_peak_pyramid(samples: np.ndarray) -> list[np.ndarray]:
+    """Precompute progressively coarser absolute peaks for fast scrolling."""
+    levels = [np.abs(np.asarray(samples, dtype=np.float32))]
+    while len(levels[-1]) > 1:
+        current = levels[-1]
+        if len(current) % 2:
+            current = np.pad(current, (0, 1))
+        levels.append(current.reshape(-1, 2).max(axis=1))
+    return levels
 
 
 '''
@@ -226,6 +238,9 @@ class MoraCutterApp(AppBase):
         self.project_path: str | None = None
         self.current_source_id: str | None = None
         self.current_samples: np.ndarray | None = None
+        self.current_peak_pyramid: list[np.ndarray] | None = None
+        self._audio_cache: OrderedDict[str, tuple[np.ndarray, list[np.ndarray]]] = OrderedDict()
+        self._audio_load_token = 0
         self.current_segment_id: str | None = None
         self.draft_segment: Segment | None = None
         self.manual_next_start = 0.0
@@ -248,6 +263,10 @@ class MoraCutterApp(AppBase):
         self.export_checked_ids: set[str] = set()
         self._known_segment_ids: set[str] = set()
         self._refreshing_segment_tree = False
+        self._search_refresh_job: str | None = None
+        self._collection_preview_job: str | None = None
+        self._source_index: dict[str, AudioSource] = {}
+        self._segment_index: dict[str, Segment] = {}
         self.player: subprocess.Popen[bytes] | None = None
         self.playhead_time = 0.0
         self._playback_started_at = 0.0
@@ -258,6 +277,7 @@ class MoraCutterApp(AppBase):
         self._playback_path = ""
         self._playback_gain_db = 0.0
         self.jobs: queue.Queue[tuple[str, object]] = queue.Queue()
+        self._pending_progress: tuple[float, str] | None = None
         self._wave_cache_key: tuple[object, ...] | None = None
         self._wave_cache_peaks: np.ndarray | None = None
         self._wave_render_key: tuple[object, ...] | None = None
@@ -521,7 +541,7 @@ class MoraCutterApp(AppBase):
         self.transcript_text.bind("<FocusOut>", lambda _: self._save_transcript())
         self.mora_preview = ttk.Label(transcript_frame, text="収集用リスト: 0件", wraplength=280, justify="left")
         self.mora_preview.pack(fill="x", pady=(5, 0))
-        self.transcript_text.bind("<KeyRelease>", lambda _: self._update_mora_preview())
+        self.transcript_text.bind("<KeyRelease>", self._queue_collection_preview)
 
         status = ttk.Frame(self, relief="sunken", padding=(7, 3))
         status.pack(fill="x", side="bottom")
@@ -601,8 +621,8 @@ class MoraCutterApp(AppBase):
         self.commit_draft()
         return "break"
 
-    def _record(self) -> None:
-        self.history.record(self.project)
+    def _record(self, coalesce_key: str | None = None) -> None:
+        self.history.record(self.project, coalesce_key)
         self._dirty = True
 
     def _set_progress(self, percent: float, message: str) -> None:
@@ -612,7 +632,9 @@ class MoraCutterApp(AppBase):
         self.status_var.set(message)
 
     def _queue_progress(self, percent: float, message: str) -> None:
-        self.jobs.put(("progress", (percent, message)))
+        # Progress is replaceable state; retaining every intermediate update
+        # can starve UI input when workers report rapidly.
+        self._pending_progress = (percent, message)
 
     def _enable_file_drop(self) -> None:
         if DND_FILES is None or not hasattr(self, "drop_target_register"):
@@ -651,10 +673,10 @@ class MoraCutterApp(AppBase):
         self.status_var.set(status)
 
     def current_source(self) -> AudioSource | None:
-        return next((s for s in self.project.sources if s.id == self.current_source_id), None)
+        return self._source_index.get(self.current_source_id or "")
 
     def current_segment(self) -> Segment | None:
-        return next((s for s in self.project.segments if s.id == self.current_segment_id), None)
+        return self._segment_index.get(self.current_segment_id or "")
 
     def add_audio(self) -> None:
         paths = filedialog.askopenfilenames(title="音声ファイルを追加", filetypes=[("音声", "*.wav *.mp3 *.flac *.m4a *.aac *.ogg *.mp4"), ("すべて", "*.*")])
@@ -688,17 +710,20 @@ class MoraCutterApp(AppBase):
         self._record()
         self.project.sources = [s for s in self.project.sources if s.id != source.id]
         self.project.segments = [s for s in self.project.segments if s.source_id != source.id]
+        self._audio_cache.pop(source.id, None)
         self.current_source_id = self.project.sources[0].id if self.project.sources else None
         self.current_samples = None
         self._after_project_change("素材を除外しました")
         self._load_current_audio()
 
     def refresh_sources(self) -> None:
+        self._source_index = {source.id: source for source in self.project.sources}
+        counts = Counter(segment.source_id for segment in self.project.segments)
         selected = self.current_source_id
         self.source_list.delete(0, "end")
         select_index = None
         for i, source in enumerate(self.project.sources):
-            count = sum(s.source_id == source.id for s in self.project.segments)
+            count = counts[source.id]
             self.source_list.insert("end", f"{source.display_name}  ({count})")
             if source.id == selected:
                 select_index = i
@@ -717,6 +742,7 @@ class MoraCutterApp(AppBase):
         self.manual_next_start = 0.0
         self.playhead_time = 0.0
         self.current_samples = None
+        self.current_peak_pyramid = None
         self.selection = (0.0, 0.0)
         self.zoom_level = 1.0
         self.viewport_start = 0.0
@@ -725,6 +751,8 @@ class MoraCutterApp(AppBase):
         self._load_current_audio()
 
     def _load_current_audio(self) -> None:
+        self._audio_load_token += 1
+        load_token = self._audio_load_token
         self._clear_visual_cache()
         self._update_viewport_step_buttons()
         source = self.current_source()
@@ -736,22 +764,37 @@ class MoraCutterApp(AppBase):
         self.transcript_text.delete("1.0", "end")
         self.transcript_text.insert("1.0", self.project.collection_list)
         self._update_mora_preview()
+        cached = self._audio_cache.get(source.id)
+        if cached is not None:
+            self._audio_cache.move_to_end(source.id)
+            self.current_samples, self.current_peak_pyramid = cached
+            self.draw_audio()
+            self._set_progress(100, "キャッシュから表示しました")
+            self.refresh_segments()
+            return
         self._set_progress(0, f"表示準備: {source.display_name}")
         source_id = source.id
         def worker() -> None:
             try:
                 self._queue_progress(10, f"音声を読み込み中: {source.display_name}")
                 samples = decode_mono(source.path, DISPLAY_RATE)
-                self.jobs.put(("decoded", (source_id, samples)))
+                peaks = _build_peak_pyramid(samples)
+                self.jobs.put(("decoded", (source_id, load_token, samples, peaks)))
             except Exception as exc:
-                self.jobs.put(("error", str(exc)))
+                self.jobs.put(("decode_error", (source_id, load_token, str(exc))))
         threading.Thread(target=worker, daemon=True).start()
         self.refresh_segments()
 
     def _poll_jobs(self) -> None:
+        pending_progress = self._pending_progress
+        self._pending_progress = None
+        if pending_progress is not None:
+            self._set_progress(*pending_progress)
+        processed = 0
         try:
-            while True:
+            while processed < 50:
                 kind, payload = self.jobs.get_nowait()
+                processed += 1
                 if kind == "progress":
                     percent, message = payload  # type: ignore[misc]
                     self._set_progress(percent, message)
@@ -767,12 +810,23 @@ class MoraCutterApp(AppBase):
                         messagebox.showwarning("一部のファイルを読めませんでした", "\n".join(errors))
                     self._set_progress(100, f"{len(sources)}ファイルを追加しました")
                 elif kind == "decoded":
-                    source_id, samples = payload  # type: ignore[misc]
-                    if source_id == self.current_source_id:
+                    source_id, load_token, samples, peaks = payload  # type: ignore[misc]
+                    if source_id in self._source_index:
+                        self._audio_cache[source_id] = (samples, peaks)
+                        self._audio_cache.move_to_end(source_id)
+                        while len(self._audio_cache) > 3:
+                            self._audio_cache.popitem(last=False)
+                    if source_id == self.current_source_id and load_token == self._audio_load_token:
                         self.current_samples = samples
+                        self.current_peak_pyramid = peaks
                         self._clear_visual_cache()
                         self.draw_audio()
                         self._set_progress(100, "表示データを読み込みました")
+                elif kind == "decode_error":
+                    source_id, load_token, error = payload  # type: ignore[misc]
+                    if source_id == self.current_source_id and load_token == self._audio_load_token:
+                        self._set_progress(0, "音声読み込みエラー")
+                        messagebox.showerror("音声を読み込めません", error)
                 elif kind == "detected":
                     self._finish_detection()
                     source_id, segments = payload  # type: ignore[misc]
@@ -820,7 +874,7 @@ class MoraCutterApp(AppBase):
                     self._set_progress(0, "解析をキャンセルしました")
         except queue.Empty:
             pass
-        self.after(100, self._poll_jobs)
+        self.after(10 if processed >= 50 else 100, self._poll_jobs)
 
     def draw_audio(self, interactive: bool = False) -> None:
         source = self.current_source()
@@ -829,17 +883,15 @@ class MoraCutterApp(AppBase):
             self.wave_canvas.delete("all")
             self.wave_canvas.create_text(self.wave_canvas.winfo_width()/2, 90, text="音声を選択してください", fill="#8e99a5")
             return
-        self.update_idletasks()
         width = max(400, self.wave_canvas.winfo_width())
         height = max(160, self.wave_canvas.winfo_height())
         middle = height / 2
         view_start, view_end = self._visible_range()
         sample_start = max(0, int(view_start * DISPLAY_RATE))
         sample_end = min(len(samples), max(sample_start + 1, int(view_end * DISPLAY_RATE)))
-        visible_samples = samples[sample_start:sample_end]
         # During scrollbar dragging a compact envelope is enough; the full
         # waveform is restored on release.
-        bins = min(width if not interactive else 480, len(visible_samples))
+        bins = min(width if not interactive else 320, sample_end - sample_start)
         display_gain = float(10 ** (self.wave_gain_var.get() / 20))
         # Selection, cue and playhead updates call draw_audio too.  The waveform
         # itself is immutable until its visible range, size or gain changes, so
@@ -855,7 +907,15 @@ class MoraCutterApp(AppBase):
         if cache_key == self._wave_cache_key and self._wave_cache_peaks is not None:
             peaks = self._wave_cache_peaks
         else:
-            peaks = _peak_envelope(visible_samples, bins)
+            pyramid = self.current_peak_pyramid
+            if pyramid:
+                samples_per_bin = max(1.0, (sample_end - sample_start) / max(bins, 1))
+                level = min(len(pyramid) - 1, max(0, int(math.log2(samples_per_bin))))
+                scale = 1 << level
+                coarse = pyramid[level][sample_start // scale:max(sample_start // scale + 1, math.ceil(sample_end / scale))]
+                peaks = _peak_envelope(coarse, bins)
+            else:
+                peaks = _peak_envelope(samples[sample_start:sample_end], bins)
             self._wave_cache_key = cache_key
             self._wave_cache_peaks = peaks
         x = np.linspace(0, max(0, width-1), len(peaks), dtype=np.float32)
@@ -1004,7 +1064,7 @@ class MoraCutterApp(AppBase):
         # A short throttle tracks the scrollbar without scheduling a redraw for
         # every individual Tk scale event.
         self._viewport_interacting = True
-        self._viewport_redraw_job = self.after(8, self._redraw_viewport)
+        self._viewport_redraw_job = self.after(16, self._redraw_viewport)
 
     def _redraw_viewport(self) -> None:
         self._viewport_redraw_job = None
@@ -1402,6 +1462,7 @@ class MoraCutterApp(AppBase):
         segment.quality_score = 0.45*clarity + 0.30*noise + 0.25*stability
 
     def refresh_segments(self) -> None:
+        self._segment_index = {segment.id: segment for segment in self.project.segments}
         all_ids = {segment.id for segment in self.project.segments}
         # New candidates are selected for export by default. Existing manual
         # check choices survive sorting, filtering and source changes.
@@ -1411,7 +1472,6 @@ class MoraCutterApp(AppBase):
         previously_selected = set(self.segment_tree.selection())
         self._refreshing_segment_tree = True
         try:
-            self.segment_tree.delete(*self.segment_tree.get_children())
             query = self.search_var.get().lower().strip()
             source_names = {source.id: Path(source.path).name for source in self.project.sources}
             # First reduce the project-wide list to the search result, then sort
@@ -1435,13 +1495,26 @@ class MoraCutterApp(AppBase):
             }
             segments = sorted(segments, key=key_functions[self.list_sort_key], reverse=self.list_sort_reverse)
             duplicate_numbers: dict[str, int] = {}
+            desired: list[tuple[str, tuple[object, ...]]] = []
             for segment in segments:
                 duplicate_numbers[segment.label] = duplicate_numbers.get(segment.label, 0) + 1
                 source_name = source_names.get(segment.source_id, "（素材なし）")
                 occurrence = duplicate_numbers[segment.label]
                 display_label = segment.label if occurrence == 1 else f"{segment.label} ({occurrence})"
                 mark = "☑" if segment.id in self.export_checked_ids else "☐"
-                self.segment_tree.insert("", "end", iid=segment.id, values=(mark, display_label, source_name, segment.pitch, f"{segment.start:.3f}", f"{segment.end:.3f}"))
+                desired.append((segment.id, (mark, display_label, source_name, segment.pitch, f"{segment.start:.3f}", f"{segment.end:.3f}")))
+            desired_ids = {segment_id for segment_id, _ in desired}
+            existing_ids = set(self.segment_tree.get_children())
+            obsolete = existing_ids - desired_ids
+            if obsolete:
+                self.segment_tree.delete(*obsolete)
+            for position, (segment_id, values) in enumerate(desired):
+                if self.segment_tree.exists(segment_id):
+                    if tuple(self.segment_tree.item(segment_id, "values")) != tuple(str(value) for value in values):
+                        self.segment_tree.item(segment_id, values=values)
+                    self.segment_tree.move(segment_id, "", position)
+                else:
+                    self.segment_tree.insert("", position, iid=segment_id, values=values)
             restored = [segment_id for segment_id in previously_selected if self.segment_tree.exists(segment_id)]
             if restored:
                 self.segment_tree.selection_set(restored)
@@ -1462,7 +1535,7 @@ class MoraCutterApp(AppBase):
             self.export_checked_ids.update(ids)
         else:
             self.export_checked_ids.difference_update(ids)
-        self.refresh_segments()
+        self._update_export_marks(ids)
 
     def _set_selected_export_checks(self, checked: bool) -> None:
         ids = set(self.segment_tree.selection())
@@ -1473,7 +1546,15 @@ class MoraCutterApp(AppBase):
             self.export_checked_ids.update(ids)
         else:
             self.export_checked_ids.difference_update(ids)
-        self.refresh_segments()
+        self._update_export_marks(ids)
+
+    def _update_export_marks(self, ids: set[str]) -> None:
+        for segment_id in ids:
+            if self.segment_tree.exists(segment_id):
+                values = list(self.segment_tree.item(segment_id, "values"))
+                if values:
+                    values[0] = "☑" if segment_id in self.export_checked_ids else "☐"
+                    self.segment_tree.item(segment_id, values=values)
 
     def _tree_checkbox_click(self, event: tk.Event) -> str | None:
         """Toggle one checkbox, or every currently selected row as a batch."""
@@ -1488,11 +1569,17 @@ class MoraCutterApp(AppBase):
             self.export_checked_ids.difference_update(targets)
         else:
             self.export_checked_ids.update(targets)
-        self.refresh_segments()
+        self._update_export_marks(targets)
         return "break"
 
     def _search_changed(self, *_: object) -> None:
         self._coverage_filter_labels = None
+        if self._search_refresh_job is not None:
+            self.after_cancel(self._search_refresh_job)
+        self._search_refresh_job = self.after(140, self._apply_search_filter)
+
+    def _apply_search_filter(self) -> None:
+        self._search_refresh_job = None
         self.refresh_segments()
 
     def _sort_list(self, column: str) -> None:
@@ -1570,12 +1657,14 @@ class MoraCutterApp(AppBase):
                      segment.start == values["start"] and segment.cue == values["cue"] and segment.end == values["end"])
         if unchanged:
             return True
-        self._record()
+        timing_changed = (segment.cue != values["cue"] or segment.end != values["end"])
+        self._record(f"detail:{segment.id}")
         segment.label = label
         segment.pitch = pitch
         segment.start, segment.cue, segment.end = values["start"], values["cue"], values["end"]
         segment.clamp(source.duration)
-        self._analyze_segment(segment)
+        if timing_changed:
+            self._analyze_segment(segment)
         self._after_project_change(status)
         return True
 
@@ -1770,6 +1859,15 @@ class MoraCutterApp(AppBase):
         if self.project.collection_list != value:
             self.project.collection_list = value
             self._dirty = True
+
+    def _queue_collection_preview(self, _event: object = None) -> None:
+        if self._collection_preview_job is not None:
+            self.after_cancel(self._collection_preview_job)
+        self._collection_preview_job = self.after(160, self._apply_collection_preview)
+
+    def _apply_collection_preview(self) -> None:
+        self._collection_preview_job = None
+        self._update_mora_preview()
 
     def _update_mora_preview(self) -> None:
         raw = self.transcript_text.get("1.0", "end-1c")
@@ -1978,8 +2076,8 @@ class MoraCutterApp(AppBase):
             numbers: dict[tuple[str, str, str], int] = {}
             exported = 0
             errors: list[str] = []
-            for index, segment in enumerate(segments, 1):
-                self._queue_progress((index-1)/len(segments)*95, f"WAV書き出し中: {index}/{len(segments)}")
+            tasks: list[tuple[Segment, AudioSource, str]] = []
+            for segment in segments:
                 source = sources.get(segment.source_id)
                 if not source or not Path(source.path).exists():
                     errors.append(f"{segment.label}: 元ファイルがありません")
@@ -1987,11 +2085,24 @@ class MoraCutterApp(AppBase):
                 key = (segment.label, segment.pitch, source.display_name)
                 numbers[key] = numbers.get(key, 0) + 1
                 filename = "_".join((safe_filename(segment.label), safe_filename(segment.pitch), safe_filename(source.display_name), f"{numbers[key]:03d}")) + ".wav"
-                try:
-                    export_segment(source.path, str(Path(folder)/filename), segment.cue, segment.end, settings.sample_rate, settings.bit_depth, settings.normalize)
-                    exported += 1
-                except Exception as exc:
-                    errors.append(f"{filename}: {exc}")
+                tasks.append((segment, source, filename))
+
+            def export_one(task: tuple[Segment, AudioSource, str]) -> str:
+                segment, source, filename = task
+                export_segment(source.path, str(Path(folder)/filename), segment.cue, segment.end, settings.sample_rate, settings.bit_depth, settings.normalize)
+                return filename
+
+            workers = min(4, max(1, len(tasks)))
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {executor.submit(export_one, task): task[2] for task in tasks}
+                for completed, future in enumerate(as_completed(futures), 1):
+                    filename = futures[future]
+                    self._queue_progress(completed/max(1, len(tasks))*95, f"WAV書き出し中: {completed}/{len(tasks)}")
+                    try:
+                        future.result()
+                        exported += 1
+                    except Exception as exc:
+                        errors.append(f"{filename}: {exc}")
             self.jobs.put(("export_done", (exported, errors, folder)))
         threading.Thread(target=worker, daemon=True).start()
 
@@ -2145,10 +2256,13 @@ class MoraCutterApp(AppBase):
             return
         self.stop_audio()
         self.project = Project()
+        self._audio_load_token += 1
+        self._audio_cache.clear()
         self.project_path = None
         self.current_source_id = None
         self.current_segment_id = None
         self.current_samples = None
+        self.current_peak_pyramid = None
         self.history = History(100)
         self.export_checked_ids.clear()
         self._known_segment_ids.clear()
@@ -2166,11 +2280,14 @@ class MoraCutterApp(AppBase):
     def _load_project_path(self, path: str) -> None:
         try:
             self.project = load_project(path)
+            self._audio_load_token += 1
+            self._audio_cache.clear()
             self.project_path = path
             self._remember_project(path)
             self.current_source_id = self.project.sources[0].id if self.project.sources else None
             self.current_segment_id = None
             self.current_samples = None
+            self.current_peak_pyramid = None
             self.history = History(100)
             self.export_checked_ids.clear()
             self._known_segment_ids.clear()
