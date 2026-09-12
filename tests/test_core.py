@@ -2,6 +2,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 
 import numpy as np
@@ -36,8 +37,9 @@ class JapaneseTests(unittest.TestCase):
         # Keep the fixture in kana so this unit test does not depend on the
         # optional pyopenjtalk reading converter being installed.
         words = [(0.1, 0.9, "こんにちは", 0.8)]
-        units = _transcript_units(words, "こんにちは", "mora", samples, 1.0)
-        self.assertEqual([unit[2] for unit in units], ["こ", "ん", "に", "ち", "わ"])
+        with patch("mora_cutter.whisper_detection._reading", side_effect=lambda text: text):
+            units = _transcript_units(words, "こんにちは", "mora", samples, 1.0)
+        self.assertEqual([unit[2] for unit in units], ["こ", "ん", "に", "ち", "は"])
 
     def test_transcript_alignment_keeps_word_timing_anchors(self):
         samples = np.sin(np.linspace(0, 100, 24000)).astype(np.float32)
