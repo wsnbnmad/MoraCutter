@@ -234,7 +234,6 @@ class MoraCutterApp(AppBase):
         self.drag_anchor = 0.0
         self.zoom_level = 1.0
         self.viewport_start = 0.0
-        self.spectrum_expanded = False
         self._viewport_redraw_job: str | None = None
         self._suppress_viewport_command = False
         self.pan_anchor_x = 0.0
@@ -259,11 +258,9 @@ class MoraCutterApp(AppBase):
         self._playback_path = ""
         self._playback_gain_db = 0.0
         self.jobs: queue.Queue[tuple[str, object]] = queue.Queue()
-        self._spectrogram_photo: tk.PhotoImage | None = None
         self._wave_cache_key: tuple[object, ...] | None = None
         self._wave_cache_peaks: np.ndarray | None = None
         self._wave_render_key: tuple[object, ...] | None = None
-        self._spectrogram_cache_key: tuple[object, ...] | None = None
         self._viewport_interacting = False
         self._dirty = False
         # 自動音声認識は現在保留（手入力切り出しに専念する版）。
@@ -451,10 +448,6 @@ class MoraCutterApp(AppBase):
         self.viewport_forward_button.pack(side="left", padx=(3, 2))
         self._update_viewport_step_buttons()
         ttk.Button(navigation, text="全体表示", command=self.reset_zoom).pack(side="left", padx=(5, 0))
-
-        self.spectrum_button = ttk.Button(visual, text="▶ スペクトログラムを展開", command=self.toggle_spectrum)
-        self.spectrum_button.pack(fill="x", pady=(1, 0))
-        self.spec_canvas = tk.Canvas(visual, height=130, bg="#07090d", highlightthickness=1, highlightbackground="#3a4653")
 
         action_row = ttk.Frame(visual, padding=(0, 6))
         self.action_row = action_row
@@ -834,7 +827,6 @@ class MoraCutterApp(AppBase):
         samples = self.current_samples
         if source is None or samples is None or len(samples) == 0:
             self.wave_canvas.delete("all")
-            self.spec_canvas.delete("all")
             self.wave_canvas.create_text(self.wave_canvas.winfo_width()/2, 90, text="音声を選択してください", fill="#8e99a5")
             return
         self.update_idletasks()
@@ -845,8 +837,8 @@ class MoraCutterApp(AppBase):
         sample_start = max(0, int(view_start * DISPLAY_RATE))
         sample_end = min(len(samples), max(sample_start + 1, int(view_end * DISPLAY_RATE)))
         visible_samples = samples[sample_start:sample_end]
-        # During scrollbar dragging a compact envelope is enough; a full-width
-        # waveform and spectrogram are restored on release.
+        # During scrollbar dragging a compact envelope is enough; the full
+        # waveform is restored on release.
         bins = min(width if not interactive else 480, len(visible_samples))
         display_gain = float(10 ** (self.wave_gain_var.get() / 20))
         # Selection, cue and playhead updates call draw_audio too.  The waveform
@@ -854,9 +846,7 @@ class MoraCutterApp(AppBase):
         # keep that expensive layer on the Canvas and redraw overlays only.
         render_key = (
             source.id, sample_start, sample_end, width, height,
-            round(display_gain, 6), self.spectrum_expanded,
-            self.spec_canvas.winfo_height() if self.spectrum_expanded else 0,
-            bins, interactive,
+            round(display_gain, 6), bins, interactive,
         )
         if render_key == self._wave_render_key:
             self._draw_overlays()
@@ -883,12 +873,6 @@ class MoraCutterApp(AppBase):
             x = self._time_to_x(float(sec), width)
             self.wave_canvas.create_line(x, 0, x, height, fill="#27313a")
             self.wave_canvas.create_text(x+3, 9, text=self._format_time(float(sec)), fill="#8e99a5", anchor="nw", font=("TkDefaultFont", 8))
-        if self.spectrum_expanded and not interactive:
-            spec_height = max(90, self.spec_canvas.winfo_height())
-            spec_key = (source.id, sample_start, sample_end, width, spec_height)
-            if spec_key != self._spectrogram_cache_key:
-                self._draw_spectrogram(visible_samples, width, spec_height)
-                self._spectrogram_cache_key = spec_key
         self._wave_render_key = render_key
         self._draw_overlays()
 
@@ -896,8 +880,6 @@ class MoraCutterApp(AppBase):
         self._wave_cache_key = None
         self._wave_cache_peaks = None
         self._wave_render_key = None
-        self._spectrogram_cache_key = None
-        self._spectrogram_photo = None
 
     @staticmethod
     def _timeline_ticks(start: float, end: float) -> list[float]:
@@ -908,37 +890,6 @@ class MoraCutterApp(AppBase):
         first = math.ceil(start / interval) * interval
         ticks = [first + index * interval for index in range(int(span / interval) + 2)]
         return [value for value in ticks if start - 1e-9 <= value <= end + 1e-9]
-
-    def _draw_spectrogram(self, samples: np.ndarray, width: int, height: int) -> None:
-        fft_size = 256
-        hops = max(1, (len(samples) - fft_size) // max(1, width - 1))
-        frames = []
-        for start in range(0, max(1, len(samples)-fft_size), hops):
-            frame = samples[start:start+fft_size]
-            if len(frame) < fft_size:
-                break
-            power = np.abs(np.fft.rfft(frame * np.hanning(fft_size)))
-            frames.append(20*np.log10(power + 1e-5))
-            if len(frames) >= width:
-                break
-        if not frames:
-            self.spec_canvas.delete("all")
-            return
-        spec = np.array(frames).T
-        spec = spec[: min(spec.shape[0], 112)]
-        lo, hi = np.percentile(spec, (15, 99))
-        norm = np.clip((spec-lo)/max(hi-lo, 1e-6), 0, 1)
-        y_idx = np.linspace(norm.shape[0]-1, 0, height).astype(int)
-        x_idx = np.linspace(0, norm.shape[1]-1, width).astype(int)
-        image = norm[y_idx][:, x_idx]
-        rgb = np.empty((height, width, 3), dtype=np.uint8)
-        rgb[..., 0] = np.clip(255 * np.maximum(0, image-0.45) * 1.8, 0, 255)
-        rgb[..., 1] = np.clip(255 * image ** 0.8, 0, 255)
-        rgb[..., 2] = np.clip(255 * np.minimum(1, image*1.5), 0, 255)
-        ppm = f"P6\n{width} {height}\n255\n".encode() + rgb.tobytes()
-        self._spectrogram_photo = tk.PhotoImage(data=ppm, format="PPM")
-        self.spec_canvas.delete("all")
-        self.spec_canvas.create_image(0, 0, image=self._spectrogram_photo, anchor="nw")
 
     def _draw_overlays(self) -> None:
         self.wave_canvas.delete("overlay")
@@ -1091,16 +1042,6 @@ class MoraCutterApp(AppBase):
         ratio = float(np.clip(event.x / max(self.wave_canvas.winfo_width(), 1), 0, 1))
         self.change_zoom(direction, anchor_time=self._x_to_time(event.x), anchor_ratio=ratio)
         return "break"
-
-    def toggle_spectrum(self) -> None:
-        self.spectrum_expanded = not self.spectrum_expanded
-        if self.spectrum_expanded:
-            self.spec_canvas.pack(fill="x", expand=True, pady=(4, 0), before=self.action_row)
-            self.spectrum_button.config(text="▼ スペクトログラムを格納")
-        else:
-            self.spec_canvas.pack_forget()
-            self.spectrum_button.config(text="▶ スペクトログラムを展開")
-        self.draw_audio()
 
     def _canvas_press(self, event: tk.Event) -> None:
         self.wave_canvas.focus_set()
@@ -1677,17 +1618,23 @@ class MoraCutterApp(AppBase):
             segment.sigh = False
             self.sigh_var.set(False)
             if segment.breath:
+                if segment.label not in {"(ブレス)", "(息)"}:
+                    segment.label_before_voice_type = segment.label
                 segment.label = "(ブレス)"
             elif segment.label == "(ブレス)":
-                segment.label = "未分類"
+                segment.label = segment.label_before_voice_type or "未分類"
+                segment.label_before_voice_type = ""
         else:
             segment.sigh = self.sigh_var.get()
             segment.breath = False
             self.breath_var.set(False)
             if segment.sigh:
+                if segment.label not in {"(ブレス)", "(息)"}:
+                    segment.label_before_voice_type = segment.label
                 segment.label = "(息)"
             elif segment.label == "(息)":
-                segment.label = "未分類"
+                segment.label = segment.label_before_voice_type or "未分類"
+                segment.label_before_voice_type = ""
         self._fill_detail(segment)
         self._after_project_change("発声種別を更新しました")
 

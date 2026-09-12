@@ -35,6 +35,8 @@ class Segment:
     quality_score: float = 0.0
     breath: bool = False
     sigh: bool = False
+    # Restore the pronunciation after temporarily marking this as breath/sigh.
+    label_before_voice_type: str = ""
     gain_db: float = 0.0
     order: int = 0
     origin: str = "auto"
