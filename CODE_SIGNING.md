@@ -32,4 +32,4 @@ GitHub ActionsのARM64候補を展開した後、秘密鍵があるx64ビルドP
 
 ## 公開
 
-GitHub Releasesへx64 ZIP、ARM64 ZIP、Source ZIP、それぞれの`.sha256.txt`、更新履歴、既知の制限を掲載します。DiscordにはGitHub Releasesへのリンクだけを掲載します。
+GitHub Releases（`wsnbnmad/MoraCutter`）へx64 ZIP、ARM64 ZIP、Source ZIP、それぞれの`.sha256.txt`、更新履歴、既知の制限を掲載します。DiscordにはGitHub Releasesへのリンクだけを掲載します。

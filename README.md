@@ -50,7 +50,7 @@ ARM64版はWindows ARM64上のネイティブPythonで実行します。
 ./build_windows.ps1 -Architecture x64 -FFmpegBin C:\path\to\ffmpeg\bin -CertificateThumbprint 40文字の拇印
 ```
 
-GitHub Actionsはx64とARM64の未署名候補を別々に生成します。候補を確認後、秘密鍵を保持するローカル環境で`finalize_windows_package.ps1`を使って署名・ハッシュ作成・ZIP化します。秘密鍵やPFXはリポジトリへ保存しません。
+GitHub Actionsはx64とARM64の未署名候補を別々に生成します。候補を確認後、秘密鍵を保持するローカル環境で`finalize_windows_package.ps1`を使って署名・ハッシュ作成・ZIP化します。秘密鍵やPFXはリポジトリへ保存しません。公開先は`wsnbnmad/MoraCutter`です。
 
 ## プロジェクト互換性
 

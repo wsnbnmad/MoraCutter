@@ -57,7 +57,7 @@ FFmpegはMoraCutterとは別のプログラムで、FFmpeg側のライセンス�
 配布元・不具合報告
 ------------------
 公式サイト: https://signal88.com
-ソースコード・配布・Issues: https://github.com/sugarmgx/MoraCutter
+ソースコード・配布・Issues: https://github.com/wsnbnmad/MoraCutter
 
 ライセンス
 ----------
