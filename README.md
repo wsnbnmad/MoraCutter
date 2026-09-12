@@ -7,10 +7,9 @@
 [GitHub Releases](https://github.com/wsnbnmad/MoraCutter/releases)から、お使いのPCに合うZIPをダウンロードしてください。
 
 - 一般的なIntel / AMD搭載PC: `Windows-x64.zip`
-- Windows on ARM搭載PC: `Windows-ARM64.zip`
 - ソースコードを確認・利用する場合: `Source.zip`
 
-Windows 10 / 11に対応しています。インストール、Python、管理者権限は必要ありません。
+Windows 10 / 11のx64版に対応しています。インストール、Python、管理者権限は必要ありません。
 
 ## はじめ方
 
