@@ -33,7 +33,9 @@ class JapaneseTests(unittest.TestCase):
 
     def test_transcript_overrides_recognition_labels(self):
         samples = np.sin(np.linspace(0, 100, 8000)).astype(np.float32)
-        words = [(0.1, 0.9, "誤認識", 0.8)]
+        # Keep the fixture in kana so this unit test does not depend on the
+        # optional pyopenjtalk reading converter being installed.
+        words = [(0.1, 0.9, "こんにちは", 0.8)]
         units = _transcript_units(words, "こんにちは", "mora", samples, 1.0)
         self.assertEqual([unit[2] for unit in units], ["こ", "ん", "に", "ち", "わ"])
 
