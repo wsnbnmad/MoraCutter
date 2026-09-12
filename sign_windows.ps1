@@ -56,3 +56,4 @@ if ($signature.Status -ne "Valid" -and -not $AllowSelfSigned) {
 }
 if (-not $signature.SignerCertificate) { throw "No Authenticode signer certificate was written." }
 Write-Output "Authenticode signer: $($signature.SignerCertificate.Subject); trust status: $($signature.Status)"
+exit 0

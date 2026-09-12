@@ -1,4 +1,4 @@
-MoraCutter v1.0.0 ソース版
+MoraCutter v1.0.1 ソース版
 ============================
 
 このZIPにはMoraCutterのソースコードが入っています。
