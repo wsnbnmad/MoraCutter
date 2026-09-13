@@ -11,7 +11,7 @@ ZIPを任意のフォルダへ展開し、MoraCutter.exeを起動してくださ
 
 自己署名について
 ----------------
-MoraCutter.exeはsignal88.com名義で署名されています。
+MoraCutter.exeはsgnl88.com名義で署名されています。
 公開認証局の証明書ではないため、Windows Defender SmartScreenが警告する場合があります。
 署名情報は、MoraCutter.exeのプロパティにある「デジタル署名」タブから確認できます。
 MoraCutterは公式のGitHub Releasesからダウンロードしてください。必要に応じて、GitHubに表示されるダイジェストとSHA256SUMS.txtを照合できます。
@@ -57,7 +57,7 @@ FFmpeg本体はMoraCutterの配布ZIPには含まれません。
 
 配布元・不具合報告
 ------------------
-公式サイト: https://signal88.com
+公式サイト: https://sgnl88.com
 ソースコード・配布・Issues: https://github.com/wsnbnmad/MoraCutter
 
 ライセンス

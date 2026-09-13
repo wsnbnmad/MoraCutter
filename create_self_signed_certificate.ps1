@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Subject = "CN=signal88.com", [int]$ValidYears = 10)
+param([string]$Subject = "CN=sgnl88.com", [int]$ValidYears = 10)
 
 $ErrorActionPreference = "Stop"
 $certificate = New-SelfSignedCertificate `

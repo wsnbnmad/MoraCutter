@@ -41,7 +41,7 @@ if (-not $signTool) {
     throw "64-bit SignTool was not found. Install the Windows SDK signing tools."
 }
 
-$arguments = @("sign", "/sha1", $CertificateThumbprint, "/s", "My", "/fd", "SHA256", "/d", "Mora Cutter", "/du", "https://signal88.com/")
+$arguments = @("sign", "/sha1", $CertificateThumbprint, "/s", "My", "/fd", "SHA256", "/d", "Mora Cutter", "/du", "https://sgnl88.com/")
 if ($TimestampUrl) { $arguments += @("/tr", $TimestampUrl, "/td", "SHA256") }
 $arguments += $resolvedExecutable
 & $signTool.FullName @arguments

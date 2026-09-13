@@ -15,11 +15,11 @@ VSVersionInfo(
       StringTable(
         '041104B0',
         [
-          StringStruct('CompanyName', 'signal88.com'),
+          StringStruct('CompanyName', 'sgnl88.com'),
           StringStruct('FileDescription', 'Mora Cutter - 人力ボーカロイド音声切り出し支援'),
           StringStruct('FileVersion', '1.0.1.0'),
           StringStruct('InternalName', 'MoraCutter'),
-          StringStruct('LegalCopyright', 'Copyright (C) 2026 signal88.com'),
+          StringStruct('LegalCopyright', 'Copyright (C) 2026 sgnl88.com'),
           StringStruct('OriginalFilename', 'MoraCutter.exe'),
           StringStruct('ProductName', 'Mora Cutter'),
           StringStruct('ProductVersion', '1.0.1')
