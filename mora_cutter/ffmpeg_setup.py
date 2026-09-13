@@ -43,6 +43,14 @@ def is_tool_folder(path: Path) -> bool:
     return path.is_dir() and all((path / name).is_file() for name in REQUIRED_TOOLS)
 
 
+def resolve_tool_folder(path: Path) -> Path | None:
+    """Accept either FFmpeg's bin folder or the folder directly above it."""
+    for candidate in (path, path / "bin"):
+        if is_tool_folder(candidate):
+            return candidate
+    return None
+
+
 def save_tool_folder(path: Path) -> None:
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     CONFIG_PATH.write_text(
@@ -156,6 +164,25 @@ class _DownloadDialog(tk.Toplevel):
         self.after(80, self._poll)
 
 
+def _select_existing_ffmpeg(parent: tk.Misc) -> bool:
+    folder = filedialog.askdirectory(
+        title="FFmpegのフォルダー（またはbinフォルダー）を選択",
+        parent=parent,
+    )
+    if not folder:
+        return False
+    selected = resolve_tool_folder(Path(folder))
+    if selected is None:
+        messagebox.showerror(
+            "FFmpeg",
+            "ffmpeg.exe、ffprobe.exe、ffplay.exeが揃っているフォルダーを選択してください。",
+            parent=parent,
+        )
+        return False
+    save_tool_folder(selected)
+    return True
+
+
 def ensure_ffmpeg(parent: tk.Misc) -> bool:
     installed = TOOLS_DIR / "ffmpeg" / "bin"
     configured = configured_bin_dir()
@@ -164,30 +191,24 @@ def ensure_ffmpeg(parent: tk.Misc) -> bool:
     if all(shutil.which(name.removesuffix(".exe")) for name in REQUIRED_TOOLS):
         return True
 
-    answer = messagebox.askyesnocancel(
+    download = messagebox.askyesno(
         "FFmpegが必要です",
+        "PC内を自動検索しましたが、FFmpegが見つかりませんでした。\n"
         "音声の読み込み・再生・書き出しにはFFmpegが必要です。\n\n"
-        "［はい］公式配布元からダウンロードします。\n"
-        "［いいえ］すでにあるFFmpegのbinフォルダーを選択します。\n"
-        "［キャンセル］今回は準備せずに起動します。",
+        "FFmpegをダウンロードしますか？\n"
+        "［いいえ］を選ぶと、既存のFFmpegフォルダーを自分で指定できます。",
         parent=parent,
     )
-    if answer is None:
-        return False
-    if answer is False:
-        folder = filedialog.askdirectory(title="ffmpeg.exeがあるbinフォルダーを選択", parent=parent)
-        if not folder:
-            return False
-        selected = Path(folder)
-        if not is_tool_folder(selected):
-            messagebox.showerror("FFmpeg", "ffmpeg.exe、ffprobe.exe、ffplay.exeが揃っているフォルダーを選択してください。", parent=parent)
-            return False
-        save_tool_folder(selected)
-        return True
+    if not download:
+        return _select_existing_ffmpeg(parent)
 
     dialog = _DownloadDialog(parent)
     parent.wait_window(dialog)
     if dialog.error is not None:
-        messagebox.showerror("FFmpegの準備に失敗しました", f"{dialog.error}\n\n既存のFFmpegフォルダーは、次回起動時に指定できます。", parent=parent)
-        return False
+        choose = messagebox.askyesno(
+            "FFmpegの準備に失敗しました",
+            f"{dialog.error}\n\n既存のFFmpegフォルダーを指定しますか？",
+            parent=parent,
+        )
+        return _select_existing_ffmpeg(parent) if choose else False
     return dialog.result is not None
