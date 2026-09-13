@@ -10,7 +10,7 @@ a = Analysis(
     [str(root / "main.py")],
     pathex=[str(root)],
     binaries=tkdnd_binaries,
-    datas=tkdnd_datas + [(str(root / "resources"), "resources")],
+    datas=tkdnd_datas + [(str(root / "resources"), "resources"), (str(root / "ffmpeg-manifest.json"), ".")],
     hiddenimports=tkdnd_hiddenimports,
     hookspath=[],
     hooksconfig={},

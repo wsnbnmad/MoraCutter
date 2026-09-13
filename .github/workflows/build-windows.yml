@@ -22,18 +22,10 @@ jobs:
         shell: pwsh
         run: |
           python -c "import platform; print(platform.machine())"
-      - name: Install FFmpeg tools
-        shell: pwsh
-        run: |
-          $manifest = Get-Content ffmpeg-manifest.json -Raw | ConvertFrom-Json
-          Invoke-WebRequest -UseBasicParsing $manifest.source -OutFile ffmpeg.zip
-          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-package
-          $bin = Get-ChildItem ffmpeg-package -Filter ffmpeg.exe -Recurse | Select-Object -First 1 | ForEach-Object DirectoryName
-          "FFMPEG_BIN=$bin" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Build and test unsigned candidate
         shell: pwsh
         run: |
-          ./build_windows.ps1 -Python python -Architecture "${{ matrix.architecture }}" -FFmpegBin $env:FFMPEG_BIN
+          ./build_windows.ps1 -Python python -Architecture "${{ matrix.architecture }}"
       - name: Upload candidate for local signing
         uses: actions/upload-artifact@v4
         with:

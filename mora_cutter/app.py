@@ -35,6 +35,7 @@ from .japanese import labels_for_unit
 # from .precision_detection import mfa_detect, kotoba_reazon_silero_detect
 from .project_io import load_project, save_project
 from .crash_logging import write_crash_log
+from .ffmpeg_setup import ensure_ffmpeg
 from .runtime import CACHE_DIR, CONFIG_DIR, INSTALL_DIR, RECOVERY_DIR, ensure_user_directories
 # from .whisper_detection import WhisperCancelled, whisper_detect
 
@@ -237,6 +238,7 @@ class MoraCutterApp(AppBase):
         self._set_application_icon()
         self.geometry("1420x880")
         self.minsize(1050, 680)
+        ensure_ffmpeg(self)
 
         self.project = Project()
         self.project_path: str | None = None

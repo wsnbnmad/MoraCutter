@@ -4,7 +4,6 @@ param(
     [ValidateSet("x64", "ARM64")]
     [string]$Architecture = "x64",
     [string]$OutputRoot = "",
-    [string]$FFmpegBin = "",
     [string]$CertificateThumbprint = ""
 )
 
@@ -22,22 +21,6 @@ if ($Architecture -eq "ARM64" -and $machine -notin @("ARM64", "AARCH64")) {
 }
 if ($Architecture -eq "x64" -and $machine -notin @("AMD64", "X86_64")) {
     throw "A native x64 Python is required for the x64 package. Detected: $machine"
-}
-
-if (-not $FFmpegBin) {
-    $ffmpegCommand = Get-Command ffmpeg.exe -ErrorAction SilentlyContinue
-    if ($ffmpegCommand) { $FFmpegBin = Split-Path -Parent $ffmpegCommand.Source }
-}
-if (-not $FFmpegBin) { throw "Supply -FFmpegBin with ffmpeg.exe, ffprobe.exe and ffplay.exe." }
-$FFmpegBin = (Resolve-Path -LiteralPath $FFmpegBin).Path
-foreach ($name in @("ffmpeg.exe", "ffprobe.exe", "ffplay.exe")) {
-    if (-not (Test-Path -LiteralPath (Join-Path $FFmpegBin $name))) { throw "$name was not found in $FFmpegBin" }
-}
-$ffmpegManifest = Get-Content -LiteralPath (Join-Path $projectRoot "ffmpeg-manifest.json") -Raw | ConvertFrom-Json
-foreach ($name in @("ffmpeg.exe", "ffprobe.exe", "ffplay.exe")) {
-    $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $FFmpegBin $name)).Hash
-    $expectedHash = $ffmpegManifest.files.$name
-    if ($actualHash -ne $expectedHash) { throw "$name SHA-256 mismatch. Expected $expectedHash, got $actualHash" }
 }
 
 $version = (& $Python -c "from mora_cutter import __version__; print(__version__)").Trim()
@@ -60,18 +43,13 @@ if ($LASTEXITCODE -ne 0) { throw "Tests failed." }
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed." }
 
 Move-Item -LiteralPath $portableRoot -Destination $finalFolder
-$toolTarget = Join-Path $finalFolder "tools\ffmpeg\bin"
-New-Item -ItemType Directory -Force -Path $toolTarget | Out-Null
-foreach ($name in @("ffmpeg.exe", "ffprobe.exe", "ffplay.exe")) {
-    Copy-Item -LiteralPath (Join-Path $FFmpegBin $name) -Destination (Join-Path $toolTarget $name)
-}
 Copy-Item -LiteralPath (Join-Path $projectRoot "お読みください.txt") -Destination $finalFolder
 Copy-Item -LiteralPath (Join-Path $projectRoot "LICENSE.txt") -Destination $finalFolder
 Copy-Item -LiteralPath (Join-Path $projectRoot "THIRD_PARTY_NOTICES.md") -Destination $finalFolder
 Copy-Item -LiteralPath (Join-Path $projectRoot "resources") -Destination $finalFolder -Recurse
 $thirdParty = Join-Path $finalFolder "THIRD_PARTY_LICENSES"
 Copy-Item -LiteralPath (Join-Path $projectRoot "THIRD_PARTY_LICENSES") -Destination $finalFolder -Recurse
-& $Python (Join-Path $projectRoot "build_support\collect_licenses.py") $thirdParty (Join-Path $FFmpegBin "ffmpeg.exe")
+& $Python (Join-Path $projectRoot "build_support\collect_licenses.py") $thirdParty
 if ($LASTEXITCODE -ne 0) { throw "Third-party license collection failed." }
 $readmePath = Join-Path $finalFolder "お読みください.txt"
 $readmeText = Get-Content -LiteralPath $readmePath -Raw

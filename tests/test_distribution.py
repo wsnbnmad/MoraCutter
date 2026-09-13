@@ -27,6 +27,15 @@ class DistributionTests(unittest.TestCase):
         self.assertNotIn("faster_whisper", spec)
         self.assertNotIn("nvidia.cublas", spec)
 
+    def test_windows_package_downloads_ffmpeg_instead_of_bundling_it(self):
+        root = Path(__file__).resolve().parents[1]
+        build_script = (root / "build_windows.ps1").read_text(encoding="utf-8")
+        workflow = (root / ".github" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
+        spec = (root / "MoraCutter.spec").read_text(encoding="utf-8")
+        self.assertNotIn("tools\\ffmpeg\\bin", build_script)
+        self.assertNotIn("Install FFmpeg tools", workflow)
+        self.assertIn("ffmpeg-manifest.json", spec)
+
     def test_windows_user_data_is_not_install_directory(self):
         path = user_data_dir()
         self.assertEqual(path.name, "MoraCutter")

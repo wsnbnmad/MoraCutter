@@ -12,6 +12,7 @@ from typing import Callable
 
 import numpy as np
 
+from .ffmpeg_setup import configured_bin_dir
 from .runtime import INSTALL_DIR, TOOLS_DIR
 
 
@@ -35,13 +36,19 @@ def _hidden_subprocess_kwargs() -> dict[str, object]:
 @lru_cache(maxsize=None)
 def executable(name: str) -> str:
     filename = name + ".exe" if sys.platform == "win32" else name
-    candidates = (INSTALL_DIR / "tools" / "ffmpeg" / "bin" / filename, INSTALL_DIR / "bin" / filename, TOOLS_DIR / "ffmpeg" / "bin" / filename)
+    configured = configured_bin_dir()
+    candidates = (
+        TOOLS_DIR / "ffmpeg" / "bin" / filename,
+        *((configured / filename,) if configured is not None else ()),
+        INSTALL_DIR / "tools" / "ffmpeg" / "bin" / filename,
+        INSTALL_DIR / "bin" / filename,
+    )
     for bundled in candidates:
         if bundled.exists():
             return str(bundled)
     found = shutil.which(name)
     if not found:
-        raise AudioError(f"{name} が見つかりません。PATHへFFmpegを追加してください。")
+        raise AudioError(f"{name} が見つかりません。MoraCutterを再起動してFFmpegを準備してください。")
     return found
 
 

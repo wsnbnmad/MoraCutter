@@ -43,9 +43,11 @@ MoraCutterの配布フォルダを削除してください。
 
 FFmpeg
 ------
-音声の読み込み、再生、書き出しには同梱のFFmpegを使用します。
+音声の読み込み、再生、書き出しにはFFmpegが必要です。
+初回起動時に、ダウンロードまたは既存のFFmpegフォルダーを指定する案内が表示されます。
+ダウンロードしたFFmpegは%LOCALAPPDATA%\MoraCutter\tools\ffmpegに保存されます。
 FFmpegはMoraCutterとは別のプログラムで、FFmpeg側のライセンスが適用されます。
-詳細はTHIRD_PARTY_LICENSESフォルダを参照してください。
+FFmpeg本体はMoraCutterの配布ZIPには含まれません。
 
 クラッシュログ
 --------------

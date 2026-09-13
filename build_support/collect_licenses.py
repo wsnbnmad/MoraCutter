@@ -17,8 +17,8 @@ def package_license(package: str, destination: Path) -> None:
 
 
 def main() -> None:
-    if len(sys.argv) != 3:
-        raise SystemExit("usage: collect_licenses.py DESTINATION FFMPEG_EXE")
+    if len(sys.argv) not in (2, 3):
+        raise SystemExit("usage: collect_licenses.py DESTINATION [FFMPEG_EXE]")
     destination = Path(sys.argv[1])
     destination.mkdir(parents=True, exist_ok=True)
     for package in ("numpy", "tkinterdnd2", "pyinstaller"):
@@ -29,8 +29,9 @@ def main() -> None:
     tcl_license = Path(sys.base_prefix) / "tcl" / "tk8.6" / "license.terms"
     if tcl_license.exists():
         shutil.copy2(tcl_license, destination / "Tcl-Tk-license.terms")
-    ffmpeg = subprocess.run([sys.argv[2], "-version"], capture_output=True, text=True, encoding="utf-8", errors="replace", check=True)
-    (destination / "FFmpeg-build-information.txt").write_text(ffmpeg.stdout, encoding="utf-8")
+    if len(sys.argv) == 3:
+        ffmpeg = subprocess.run([sys.argv[2], "-version"], capture_output=True, text=True, encoding="utf-8", errors="replace", check=True)
+        (destination / "FFmpeg-build-information.txt").write_text(ffmpeg.stdout, encoding="utf-8")
 
 
 if __name__ == "__main__":
