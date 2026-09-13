@@ -10,9 +10,6 @@ $folder = (Resolve-Path -LiteralPath $PackageFolder).Path
 $application = Join-Path $folder "MoraCutter.exe"
 if (-not (Test-Path -LiteralPath $application)) { throw "MoraCutter.exe was not found in $folder" }
 & (Join-Path $projectRoot "sign_windows.ps1") -Executable $application -CertificateThumbprint $CertificateThumbprint -AllowSelfSigned
-$certificate = Get-ChildItem "Cert:\CurrentUser\My\$CertificateThumbprint" -ErrorAction Stop
-Export-Certificate -Cert $certificate -FilePath (Join-Path $folder "MoraCutter-public.cer") -Force | Out-Null
-
 $hashPath = Join-Path $folder "SHA256SUMS.txt"
 if (Test-Path -LiteralPath $hashPath) { Remove-Item -LiteralPath $hashPath }
 $hashLines = Get-ChildItem -LiteralPath $folder -File -Recurse | Sort-Object FullName | ForEach-Object {

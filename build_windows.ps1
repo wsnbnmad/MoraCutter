@@ -81,8 +81,6 @@ $application = Join-Path $finalFolder "MoraCutter.exe"
 if ($CertificateThumbprint) {
     & (Join-Path $projectRoot "sign_windows.ps1") -Executable $application -CertificateThumbprint $CertificateThumbprint -AllowSelfSigned
     if ($LASTEXITCODE -ne 0) { throw "Code signing failed." }
-    $certificate = Get-ChildItem "Cert:\CurrentUser\My\$CertificateThumbprint" -ErrorAction Stop
-    Export-Certificate -Cert $certificate -FilePath (Join-Path $finalFolder "MoraCutter-public.cer") -Force | Out-Null
 } else {
     Write-Warning "The EXE is unsigned. Use create_self_signed_certificate.ps1, then pass -CertificateThumbprint."
 }
