@@ -1,6 +1,6 @@
 # Windowsで表示される署名警告について
 
-配布版の`MoraCutter.exe`は、`signal88.com`名義の自己署名証明書で署名されています。
+配布版の`MoraCutter.exe`は、`sgnl88.com`名義の自己署名証明書で署名されています。
 
 自己署名は、公開認証局が発行する証明書とは異なります。そのため、公式配布ファイルでもWindows Defender SmartScreenが「不明な発行元」などの警告を表示する場合があります。
 
