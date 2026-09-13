@@ -1,13 +1,7 @@
 # MoraCutter
 
-人力ボーカロイド用音声切り出し支援ツールです。手入力による素早い切り出しに専念し、音声処理はPC内で完結します。
+音MAD・YTPMV向けの、人力ボーカロイド用音声切り出し支援ツールです。手入力による素早い切り出しに専念し、音声処理はPC内で完結します。
 
-## ダウンロード
-
-[GitHub Releases](https://github.com/wsnbnmad/MoraCutter/releases)からZIPをダウンロードしてください。
-
-
-Windows 10 / 11のx64版に対応しています。
 
 ## はじめ方
 
@@ -33,7 +27,7 @@ Windows 10 / 11のx64版に対応しています。
 
 ## プロジェクトファイル
 
-標準形式は`.moracutter`です。旧`.mcp.json`と`.json`も読み書きできます。
+標準形式は`.moracutter`です。.json`も読み書きできます。
 
 プロジェクトファイルには元音声そのものではなく、元音声の保存場所が記録されます。元音声を移動した場合は、プロジェクトを開いた際の案内から再リンクしてください。
 
@@ -41,9 +35,6 @@ Windows 10 / 11のx64版に対応しています。
 
 設定、履歴、復旧データ、ログは`%LOCALAPPDATA%\MoraCutter`に保存されます。
 
-## Windowsの警告について
-
-MoraCutterは自己署名されているため、Windows Defender SmartScreenが警告を表示する場合があります。公式の[GitHub Releases](https://github.com/wsnbnmad/MoraCutter/releases)からダウンロードしたファイルを使用してください。詳しくは[Windowsで表示される署名警告について](CODE_SIGNING.md)を参照してください。
 
 ## 不具合報告
 
